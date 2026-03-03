@@ -504,6 +504,8 @@ class ToolCallWidget(QFrame):
     With a collapsible detail section for args and result.
     """
 
+    _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
     def __init__(self, tool_name: str, tool_call_id: str, parent: QWidget = None):
         super().__init__(parent)
         self.setObjectName("message_tool")
@@ -513,6 +515,7 @@ class ToolCallWidget(QFrame):
         self._result_text = ""
         self._is_error = False
         self._expanded = False
+        self._spin_idx = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 3, 6, 3)
@@ -548,11 +551,16 @@ class ToolCallWidget(QFrame):
         self._summary_label.setStyleSheet("color: #808080; font-size: 11px; margin-left: 6px;")
         header_layout.addWidget(self._summary_label, 1)
 
-        self._status_label = QLabel("…")
+        self._status_label = QLabel(self._SPINNER_FRAMES[0])
         self._status_label.setStyleSheet("color: #dcdcaa; font-size: 10px;")
         header_layout.addWidget(self._status_label)
 
         layout.addLayout(header_layout)
+
+        # Animated spinner while tool is executing
+        self._spin_timer = QTimer(self)
+        self._spin_timer.timeout.connect(self._spin_tick)
+        self._spin_timer.start(100)
 
         # Preview: first few lines of args, shown by default
         self._preview_label = QLabel()
@@ -592,6 +600,16 @@ class ToolCallWidget(QFrame):
         self._detail_widget.setVisible(False)
         layout.addWidget(self._detail_widget)
 
+    def _spin_tick(self) -> None:
+        """Advance the spinner animation frame."""
+        self._spin_idx = (self._spin_idx + 1) % len(self._SPINNER_FRAMES)
+        self._status_label.setText(self._SPINNER_FRAMES[self._spin_idx])
+
+    def _stop_spinner(self) -> None:
+        """Stop the spinner timer if running."""
+        if self._spin_timer.isActive():
+            self._spin_timer.stop()
+
     def _toggle(self) -> None:
         self._expanded = not self._expanded
         self._detail_widget.setVisible(self._expanded)
@@ -617,6 +635,7 @@ class ToolCallWidget(QFrame):
         # Don't update preview during streaming — wait for set_arguments
 
     def set_result(self, result: str, is_error: bool = False) -> None:
+        self._stop_spinner()
         self._result_text = result
         self._is_error = is_error
         display = result[:_MAX_RESULT_DISPLAY] + "\n... (truncated)" if len(result) > _MAX_RESULT_DISPLAY else result
@@ -638,7 +657,8 @@ class ToolCallWidget(QFrame):
             self._status_label.setStyleSheet("color: #4ec9b0; font-size: 10px;")
 
     def mark_done(self) -> None:
-        if self._status_label.text() == "…":
+        self._stop_spinner()
+        if self._status_label.text() not in ("✓", "✗"):
             self._status_label.setText("✓")
             self._status_label.setStyleSheet("color: #4ec9b0; font-size: 10px;")
 
@@ -801,6 +821,100 @@ class ToolBatchWidget(QFrame):
     @property
     def tool_name(self) -> str:
         return self._tool_name
+
+    @property
+    def count(self) -> int:
+        return self._count
+
+
+# ---------------------------------------------------------------------------
+# Tool group widget — collapsible container for runs of tool calls
+# ---------------------------------------------------------------------------
+
+class ToolGroupWidget(QFrame):
+    """Collapsible group that hides tool calls after the preview budget is exhausted.
+
+    Shows:  ▶ N tool calls   ✓
+    Clicking expands/collapses the contained tool widgets.
+    """
+
+    def __init__(self, parent: QWidget = None):
+        super().__init__(parent)
+        self.setObjectName("message_tool")
+        self._expanded = False
+        self._count = 0
+        self._done = 0
+        self._errors = 0
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 3, 6, 3)
+        layout.setSpacing(0)
+
+        # Header: ▶ N tool calls  ✓
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(6)
+
+        self._toggle_btn = QToolButton()
+        self._toggle_btn.setObjectName("collapse_button")
+        self._toggle_btn.setText("▶")
+        self._toggle_btn.setFixedSize(14, 14)
+        self._toggle_btn.clicked.connect(self._toggle)
+        header_layout.addWidget(self._toggle_btn)
+
+        self._label = QLabel("0 tool calls")
+        self._label.setStyleSheet(
+            "color: #808080; font-size: 11px; font-weight: bold;"
+        )
+        header_layout.addWidget(self._label, 1)
+
+        self._status_label = QLabel("")
+        self._status_label.setStyleSheet("color: #dcdcaa; font-size: 10px;")
+        header_layout.addWidget(self._status_label)
+
+        layout.addLayout(header_layout)
+
+        # Container for child widgets (hidden by default)
+        self._body = QWidget()
+        self._body_layout = QVBoxLayout(self._body)
+        self._body_layout.setContentsMargins(8, 2, 0, 2)
+        self._body_layout.setSpacing(2)
+        self._body.setVisible(False)
+        layout.addWidget(self._body)
+
+    def add_widget(self, widget: QWidget) -> None:
+        """Add a tool widget into this group."""
+        self._count += 1
+        self._body_layout.addWidget(widget)
+        self._update_label()
+
+    def notify_result(self, is_error: bool = False) -> None:
+        """Called when a tool inside this group finishes."""
+        self._done += 1
+        if is_error:
+            self._errors += 1
+        self._update_status()
+
+    def _update_label(self) -> None:
+        self._label.setText(f"{self._count} tool call{'s' if self._count != 1 else ''}")
+
+    def _update_status(self) -> None:
+        if self._done >= self._count:
+            if self._errors:
+                ok = self._done - self._errors
+                self._status_label.setText(f"✓{ok} ✗{self._errors}")
+                self._status_label.setStyleSheet("color: #f44747; font-size: 10px;")
+            else:
+                self._status_label.setText("✓")
+                self._status_label.setStyleSheet("color: #4ec9b0; font-size: 10px;")
+        else:
+            self._status_label.setText(f"{self._done}/{self._count}")
+            self._status_label.setStyleSheet("color: #dcdcaa; font-size: 10px;")
+
+    def _toggle(self) -> None:
+        self._expanded = not self._expanded
+        self._body.setVisible(self._expanded)
+        self._toggle_btn.setText("▼" if self._expanded else "▶")
 
     @property
     def count(self) -> int:

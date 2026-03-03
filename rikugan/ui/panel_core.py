@@ -684,7 +684,12 @@ class RikuganPanelCore(QWidget):
             return
         chat_view.handle_event(event)
         if event.usage:
-            self._update_token_display()
+            # Use prompt_tokens from the event directly — session hasn't
+            # been updated yet during streaming, so session.last_prompt_tokens
+            # would be stale.  prompt_tokens reflects current context size.
+            token_count = event.usage.prompt_tokens or event.usage.total_tokens
+            if token_count > 0:
+                self._update_token_display(token_count)
         if event.type in (TurnEventType.USER_QUESTION, TurnEventType.SAVE_APPROVAL_REQUEST):
             self._pending_answer = True
             self._set_running(False)

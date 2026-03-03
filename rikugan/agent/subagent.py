@@ -34,12 +34,14 @@ class SubagentRunner:
         config: RikuganConfig,
         host_name: str = "IDA Pro",
         skill_registry: Optional[SkillRegistry] = None,
+        parent_loop: Optional[Any] = None,
     ):
         self.provider = provider
         self.tools = tool_registry
         self.config = config
         self.host_name = host_name
         self.skills = skill_registry
+        self._parent_loop = parent_loop
 
     def run_task(
         self,
@@ -65,6 +67,7 @@ class SubagentRunner:
             session=session,
             skill_registry=self.skills,
             host_name=self.host_name,
+            parent_loop=self._parent_loop,
         )
 
         log_info(f"Subagent started: task={task[:80]!r}, max_turns={max_turns}")
@@ -87,6 +90,10 @@ class SubagentRunner:
             # Capture the last text_done as the final output
             if event.type.value == "text_done" and event.text:
                 final_text = event.text
+
+        # Sync "always allow" flag back to parent
+        if self._parent_loop and loop._always_allow_scripts:
+            self._parent_loop._always_allow_scripts = True
 
         log_info(f"Subagent finished: {len(final_text)} chars output")
         return final_text
@@ -120,6 +127,7 @@ class SubagentRunner:
             session=session,
             skill_registry=self.skills,
             host_name=self.host_name,
+            parent_loop=self._parent_loop,
         )
 
         log_info(
@@ -137,6 +145,10 @@ class SubagentRunner:
         if kb is None:
             kb = KnowledgeBase(user_goal=user_goal)
             log_debug("Subagent exploration: no knowledge base returned, using empty")
+
+        # Sync "always allow" flag back to parent
+        if self._parent_loop and loop._always_allow_scripts:
+            self._parent_loop._always_allow_scripts = True
 
         log_info(
             f"Subagent exploration finished: "

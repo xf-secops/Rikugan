@@ -13,7 +13,7 @@ from .message_widgets import (
     AssistantMessageWidget, ErrorMessageWidget, ExplorationFindingWidget,
     ExplorationPhaseWidget, QueuedMessageWidget,
     ThinkingWidget, ToolApprovalWidget, ToolBatchWidget, ToolCallWidget,
-    UserMessageWidget, UserQuestionWidget,
+    ToolGroupWidget, UserMessageWidget, UserQuestionWidget,
 )
 from ..agent.turn import TurnEvent, TurnEventType
 from ..core.types import Message, Role
@@ -56,6 +56,10 @@ class ChatView(QScrollArea):
         self._batch_map: Dict[str, ToolBatchWidget] = {}
         # Preview budget: how many tool previews left in this turn
         self._preview_budget: int = _MAX_TOOL_PREVIEWS
+        # Collapsible group for overflow tool calls
+        self._tool_group: Optional[ToolGroupWidget] = None
+        # Map tool_call_id -> group it belongs to (for result routing)
+        self._group_map: Dict[str, ToolGroupWidget] = {}
 
         # Member timer for scroll-to-bottom
         self._scroll_timer = QTimer(self)
@@ -83,22 +87,20 @@ class ChatView(QScrollArea):
 
     def remove_queued_messages(self) -> None:
         """Remove all [queued] message widgets (e.g. on cancel)."""
-        layout = self._messages_layout
-        for i in reversed(range(layout.count())):
-            item = layout.itemAt(i)
+        for i in reversed(range(self._layout.count())):
+            item = self._layout.itemAt(i)
             widget = item.widget() if item else None
             if isinstance(widget, QueuedMessageWidget):
-                layout.removeWidget(widget)
+                self._layout.removeWidget(widget)
                 widget.deleteLater()
 
     def pop_first_queued_message(self) -> None:
         """Remove the first [queued] widget (when it gets submitted)."""
-        layout = self._messages_layout
-        for i in range(layout.count()):
-            item = layout.itemAt(i)
+        for i in range(self._layout.count()):
+            item = self._layout.itemAt(i)
             widget = item.widget() if item else None
             if isinstance(widget, QueuedMessageWidget):
-                layout.removeWidget(widget)
+                self._layout.removeWidget(widget)
                 widget.deleteLater()
                 return
 
@@ -135,6 +137,10 @@ class ChatView(QScrollArea):
         self._current_batch = None
         self._current_batch_name = ""
 
+    def _flush_tool_group(self) -> None:
+        """End the current tool group (called on turn end or non-tool event)."""
+        self._tool_group = None
+
     def handle_event(self, event: TurnEvent) -> None:
         """Process a TurnEvent and update the UI accordingly."""
         etype = event.type
@@ -142,6 +148,7 @@ class ChatView(QScrollArea):
         if etype == TurnEventType.TEXT_DELTA:
             self._hide_thinking()
             self._flush_batch()
+            self._flush_tool_group()
             if self._current_assistant is None:
                 self._current_assistant = AssistantMessageWidget()
                 self._insert_widget(self._current_assistant)
@@ -151,6 +158,7 @@ class ChatView(QScrollArea):
         elif etype == TurnEventType.TEXT_DONE:
             self._hide_thinking()
             self._flush_batch()
+            self._flush_tool_group()
             if self._current_assistant is not None:
                 self._current_assistant.set_text(event.text)
             self._current_assistant = None
@@ -168,20 +176,22 @@ class ChatView(QScrollArea):
                 # Different tool or no batch — flush and start new
                 self._flush_batch()
 
-                # Create either a standalone widget or a new batch
-                # We always create a ToolCallWidget first; if the NEXT
-                # call is the same tool, we'll upgrade to a batch at that point.
                 tw = ToolCallWidget(tool_name, tool_id)
                 self._tool_widgets[tool_id] = tw
                 self._current_batch_name = tool_name
 
-                # Apply preview budget
-                if self._preview_budget <= 0:
-                    tw.hide_preview()
-                else:
+                if self._preview_budget > 0:
+                    # Within budget — show directly in chat
                     self._preview_budget -= 1
-
-                self._insert_widget(tw)
+                    self._insert_widget(tw)
+                else:
+                    # Over budget — add to collapsible group
+                    tw.hide_preview()
+                    if self._tool_group is None:
+                        self._tool_group = ToolGroupWidget()
+                        self._insert_widget(self._tool_group)
+                    self._tool_group.add_widget(tw)
+                    self._group_map[tool_id] = self._tool_group
 
             self._scroll_to_bottom()
 
@@ -216,11 +226,17 @@ class ChatView(QScrollArea):
                 tw = self._tool_widgets.get(event.tool_call_id)
                 if tw:
                     tw.set_result(event.tool_result, event.tool_is_error)
+            # Notify group if this tool belongs to one
+            group = self._group_map.get(event.tool_call_id)
+            if group:
+                group.notify_result(event.tool_is_error)
             self._scroll_to_bottom()
 
         elif etype == TurnEventType.TURN_START:
             self._current_assistant = None
             self._flush_batch()
+            self._flush_tool_group()
+            self._group_map.clear()
             self._preview_budget = _MAX_TOOL_PREVIEWS  # Reset budget per turn
             self._show_thinking()
             self._scroll_to_bottom()
@@ -228,17 +244,20 @@ class ChatView(QScrollArea):
         elif etype == TurnEventType.TURN_END:
             self._hide_thinking()
             self._flush_batch()
+            self._flush_tool_group()
             self._current_assistant = None
 
         elif etype == TurnEventType.ERROR:
             self._hide_thinking()
             self._flush_batch()
+            self._flush_tool_group()
             self._insert_widget(ErrorMessageWidget(event.error or "Unknown error"))
             self._scroll_to_bottom()
 
         elif etype == TurnEventType.USER_QUESTION:
             self._hide_thinking()
             self._flush_batch()
+            self._flush_tool_group()
             options = event.metadata.get("options", [])
             self._insert_widget(UserQuestionWidget(event.text, options))
             self._scroll_to_bottom()
@@ -246,6 +265,7 @@ class ChatView(QScrollArea):
         elif etype == TurnEventType.PLAN_GENERATED:
             self._hide_thinking()
             self._flush_batch()
+            self._flush_tool_group()
             self._plan_view = PlanView()
             if event.plan_steps:
                 self._plan_view.set_plan(event.plan_steps)
@@ -266,6 +286,7 @@ class ChatView(QScrollArea):
         elif etype == TurnEventType.TOOL_APPROVAL_REQUEST:
             self._hide_thinking()
             self._flush_batch()
+            self._flush_tool_group()
             widget = ToolApprovalWidget(
                 event.tool_call_id, event.tool_name,
                 event.tool_args, event.text,
@@ -277,6 +298,7 @@ class ChatView(QScrollArea):
         elif etype == TurnEventType.EXPLORATION_PHASE_CHANGE:
             self._hide_thinking()
             self._flush_batch()
+            self._flush_tool_group()
             meta = event.metadata
             self._insert_widget(ExplorationPhaseWidget(
                 meta.get("from_phase", ""),
@@ -298,6 +320,7 @@ class ChatView(QScrollArea):
         elif etype == TurnEventType.SAVE_APPROVAL_REQUEST:
             self._hide_thinking()
             self._flush_batch()
+            self._flush_tool_group()
             # Rendered as a user question with save options
             options = ["Save All", "Discard All"]
             self._insert_widget(UserQuestionWidget(event.text, options))
@@ -306,6 +329,7 @@ class ChatView(QScrollArea):
         elif etype == TurnEventType.CANCELLED:
             self._hide_thinking()
             self._flush_batch()
+            self._flush_tool_group()
             self._insert_widget(ErrorMessageWidget("Cancelled by user"))
             self._scroll_to_bottom()
 
@@ -392,6 +416,8 @@ class ChatView(QScrollArea):
         self._plan_view = None
         self._flush_batch()
         self._batch_map.clear()
+        self._flush_tool_group()
+        self._group_map.clear()
         self._preview_budget = _MAX_TOOL_PREVIEWS
 
     def _insert_widget(self, widget: QWidget) -> None:

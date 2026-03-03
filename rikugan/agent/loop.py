@@ -28,8 +28,9 @@ from .exploration_mode import (
     ExplorationPhase, ExplorationState, Finding, FunctionInfo,
     KnowledgeBase, ModificationPlan, PatchRecord, PatchSummary, PlannedChange,
     EXPLORATION_SYSTEM_ADDENDUM, PLAN_SYNTHESIS_PROMPT,
-    EXECUTE_STEP_PROMPT, SAVE_PROMPT,
+    EXECUTE_STEP_PROMPT,
 )
+from .minify import minify_text, minify_messages
 from ..state.session import SessionState
 
 _PLAN_GENERATION_PROMPT = (
@@ -65,6 +66,7 @@ class AgentLoop:
         session: SessionState,
         skill_registry: Optional[SkillRegistry] = None,
         host_name: str = "IDA Pro",
+        parent_loop: Optional["AgentLoop"] = None,
     ):
         self.provider = provider
         self.tools = tool_registry
@@ -72,15 +74,24 @@ class AgentLoop:
         self.session = session
         self.skills = skill_registry
         self.host_name = host_name
-        self._cancelled = threading.Event()
+        self._cancelled = parent_loop._cancelled if parent_loop else threading.Event()
         self._running = False
         self._consecutive_errors = 0
         self._tools_disabled_for_turn = False
         self._event_queue: queue.Queue[TurnEvent] = queue.Queue()
         # Thread-safe queues for user answers and tool approvals (no race condition)
-        self._user_answer_queue: queue.Queue[str] = queue.Queue(maxsize=1)
-        self._tool_approval_queue: queue.Queue[str] = queue.Queue(maxsize=1)
-        self._always_allow_scripts = False
+        # Subagents share the parent's queues so UI signals reach them.
+        self._user_answer_queue: queue.Queue[str] = (
+            parent_loop._user_answer_queue if parent_loop
+            else queue.Queue(maxsize=1)
+        )
+        self._tool_approval_queue: queue.Queue[str] = (
+            parent_loop._tool_approval_queue if parent_loop
+            else queue.Queue(maxsize=1)
+        )
+        self._always_allow_scripts = (
+            parent_loop._always_allow_scripts if parent_loop else False
+        )
         self.plan_mode = False
 
         # Context window manager — compacts history when approaching limits
@@ -277,6 +288,7 @@ class AgentLoop:
             config=self.config,
             host_name=self.host_name,
             skill_registry=self.skills,
+            parent_loop=self,
         )
 
         log_info("Phase 1 running as subagent (isolated context)")
@@ -984,14 +996,20 @@ class AgentLoop:
         last_usage: Optional[TokenUsage] = None
         raw_parts: Any = None
 
-        stream = self.provider.chat_stream(
-            messages=self.session.get_messages_for_provider(
+        # Minify all text before sending to the provider to reduce token usage
+        provider_messages = minify_messages(
+            self.session.get_messages_for_provider(
                 context_window=self.config.provider.context_window,
-            ),
+            )
+        )
+        minified_system = minify_text(system_prompt)
+
+        stream = self.provider.chat_stream(
+            messages=provider_messages,
             tools=tools_schema if tools_schema else None,
             temperature=self.config.provider.temperature,
             max_tokens=self.config.provider.max_tokens,
-            system=system_prompt,
+            system=minified_system,
         )
 
         chunk_count = 0
@@ -1032,9 +1050,33 @@ class AgentLoop:
                 yield TurnEvent.tool_call_done(tc_id, tc_name, raw_args)
 
             if chunk.usage:
-                last_usage = chunk.usage
-                self._context_manager.update_usage(chunk.usage)
-                yield TurnEvent.usage_update(chunk.usage)
+                if last_usage is None:
+                    # First chunk (e.g. message_start): ensure total_tokens is set
+                    last_usage = TokenUsage(
+                        prompt_tokens=chunk.usage.prompt_tokens,
+                        completion_tokens=chunk.usage.completion_tokens,
+                        total_tokens=(
+                            chunk.usage.total_tokens
+                            or chunk.usage.prompt_tokens + chunk.usage.completion_tokens
+                        ),
+                        cache_read_tokens=chunk.usage.cache_read_tokens,
+                        cache_creation_tokens=chunk.usage.cache_creation_tokens,
+                    )
+                else:
+                    # Accumulate: message_start sends prompt_tokens,
+                    # message_delta sends completion_tokens.
+                    last_usage = TokenUsage(
+                        prompt_tokens=last_usage.prompt_tokens + chunk.usage.prompt_tokens,
+                        completion_tokens=last_usage.completion_tokens + chunk.usage.completion_tokens,
+                        total_tokens=(
+                            last_usage.prompt_tokens + chunk.usage.prompt_tokens
+                            + last_usage.completion_tokens + chunk.usage.completion_tokens
+                        ),
+                        cache_read_tokens=last_usage.cache_read_tokens + chunk.usage.cache_read_tokens,
+                        cache_creation_tokens=last_usage.cache_creation_tokens + chunk.usage.cache_creation_tokens,
+                    )
+                self._context_manager.update_usage(last_usage)
+                yield TurnEvent.usage_update(last_usage)
 
             # Capture provider-specific raw parts (e.g. Gemini thought_signatures)
             if chunk.raw_parts is not None:
@@ -1271,6 +1313,7 @@ class AgentLoop:
                             config=self.config,
                             host_name=self.host_name,
                             skill_registry=self.skills,
+                            parent_loop=self,
                         )
                         content = yield from runner.run_task(task, max_turns=max_turns)
                         if not content:
@@ -1340,6 +1383,19 @@ class AgentLoop:
             # Mutation tracking: capture pre-state for mutating tools
             defn = self.tools.get(tc.name)
             is_mutating = defn is not None and defn.mutating
+
+            # Mutation approval gate — configurable per-session approval for
+            # mutating tools (rename, retype, set_comment, etc.)
+            if is_mutating and self.config.approve_mutations:
+                approved = yield from self._wait_for_approval(tc)
+                if not approved:
+                    tr = ToolResult(
+                        tool_call_id=tc.id, name=tc.name,
+                        content="Mutation denied by user.", is_error=True,
+                    )
+                    tool_results.append(tr)
+                    yield TurnEvent.tool_result_event(tc.id, tc.name, tr.content, True)
+                    continue
 
             pre_state: Dict[str, Any] = {}
             if is_mutating:

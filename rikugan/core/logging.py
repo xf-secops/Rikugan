@@ -19,9 +19,17 @@ import traceback
 from typing import Optional
 
 from ..constants import IDA_AVAILABLE as _IDA_AVAILABLE
-from .host import get_user_config_base_dir
+from .host import get_user_config_base_dir, is_binary_ninja as _is_binary_ninja
 if _IDA_AVAILABLE:
     ida_kernwin = importlib.import_module("ida_kernwin")
+
+_BN_AVAILABLE = _is_binary_ninja()
+_bn_log = None
+if _BN_AVAILABLE:
+    try:
+        _bn_log = importlib.import_module("binaryninja.log")
+    except Exception:
+        pass
 
 _logger: Optional[logging.Logger] = None
 
@@ -62,7 +70,7 @@ class _JSONFormatter(logging.Formatter):
 
 
 class IDAHandler(logging.Handler):
-    """Logging handler that writes to IDA's output window."""
+    """Logging handler that writes to the host's output window."""
 
     def emit(self, record: logging.LogRecord) -> None:
         msg = self.format(record)
@@ -71,6 +79,16 @@ class IDAHandler(logging.Handler):
                 ida_kernwin.msg(f"{msg}\n")
             except RuntimeError:
                 pass  # IDA output window may be destroyed during shutdown
+        elif _bn_log is not None:
+            try:
+                if record.levelno >= logging.ERROR:
+                    _bn_log.log_error(msg)
+                elif record.levelno >= logging.WARNING:
+                    _bn_log.log_warn(msg)
+                else:
+                    _bn_log.log_info(msg)
+            except Exception:
+                pass
         else:
             sys.stderr.write(f"{msg}\n")
 

@@ -271,6 +271,19 @@ something relevant.
 3. **Dive** — Decompile candidates, trace data flow, find exact constants/logic
 4. **Hypothesize** — Form concrete hypotheses about what to change
 
+### Rename as you go:
+As you explore, **rename functions whose purpose you have confidently identified**. \
+Use `rename_function` to replace generic names (sub_XXXX, FUN_XXXX) with descriptive \
+ones. This makes subsequent analysis clearer for you and the user. \
+Only rename when you are certain — if unsure, leave the original name and note your \
+hypothesis in an `exploration_report` instead. Batch renames of local variables \
+(`rename_multi_variables`) are also encouraged when decompiling a key function.
+
+### Persist your findings:
+Use `save_memory` to persist confirmed findings to RIKUGAN.md so future sessions \
+start with context. Save function purposes, architecture notes, and data structures \
+you've confidently identified. Do this as you go — don't wait until the end.
+
 Log every significant finding with `exploration_report`. When you have enough \
 understanding, call `phase_transition(to_phase="plan")`.
 """
