@@ -6,6 +6,8 @@ import json
 import time
 from typing import Dict, List, Optional
 
+_THINKING_MIN_DISPLAY_MS = 500
+
 from .qt_compat import (
     QScrollArea, QVBoxLayout, QWidget, QSizePolicy, QTimer, Qt, Signal,
 )
@@ -121,8 +123,8 @@ class ChatView(QScrollArea):
         if self._thinking is None:
             return
         elapsed_ms = (time.monotonic() - self._thinking_shown_at) * 1000
-        if elapsed_ms < 500:
-            remaining = int(500 - elapsed_ms)
+        if elapsed_ms < _THINKING_MIN_DISPLAY_MS:
+            remaining = int(_THINKING_MIN_DISPLAY_MS - elapsed_ms)
             self._thinking_hide_timer.start(remaining)
             return
         self._force_hide_thinking()

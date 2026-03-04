@@ -7,7 +7,7 @@ import threading
 from typing import List, Optional
 
 from .qt_compat import (
-    QDialog, QDialogButtonBox, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QApplication, QDialog, QDialogButtonBox, QVBoxLayout, QHBoxLayout, QFormLayout,
     QGroupBox, QComboBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox,
     QLabel, QPushButton, QWidget, Qt, QTimer,
 )
@@ -186,7 +186,6 @@ class SettingsDialog(QDialog):
         self._shown = False
         self._closed = False
         self.setWindowTitle("Rikugan Settings")
-        from .qt_compat import QApplication
         screen = QApplication.primaryScreen()
         if screen:
             avail = screen.availableGeometry()

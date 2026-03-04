@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import threading
 import time
 from typing import Any, Callable, Dict, Optional
@@ -22,6 +24,9 @@ from ..core.config import RikuganConfig
 from ..core.logging import log_error, log_info, log_debug
 from ..agent.turn import TurnEvent, TurnEventType
 from ..agent.mutation import MutationRecord
+from ..core.types import Role
+
+_TOOL_RESULT_TRUNCATE_CHARS = 2000
 
 
 class _AddButtonTabBar(QTabBar):
@@ -395,10 +400,6 @@ class RikuganPanelCore(QWidget):
     @staticmethod
     def _export_session_to_file(session, path: str) -> None:
         """Write session messages to a Markdown file."""
-        import json as _json
-        from ..core.types import Role
-
-        import re as _re
 
         def _detect_lang(text: str, tool_name: str = "", arg_key: str = "") -> str:
             """Detect language from content heuristics and tool/arg context."""
@@ -422,30 +423,30 @@ class RikuganPanelCore(QWidget):
                 return _TOOL_LANG[tool_name]
 
             # Content-based detection
-            sample = text[:2000]
+            sample = text[:_TOOL_RESULT_TRUNCATE_CHARS]
 
             # Hexdump pattern: addresses with hex bytes
-            if _re.search(r"^[0-9a-fA-F]{8,16}\s+([0-9a-fA-F]{2}\s+){4,}", sample, _re.M):
+            if re.search(r"^[0-9a-fA-F]{8,16}\s+([0-9a-fA-F]{2}\s+){4,}", sample, re.M):
                 return "text"
 
             # Assembly: mnemonics at line starts or after addresses
             asm_pat = r"(?:mov|lea|push|pop|call|ret|jmp|je|jne|jz|jnz|cmp|test|xor|add|sub|nop|int)\s"
-            if _re.search(asm_pat, sample, _re.I) and _re.search(r"0x[0-9a-fA-F]+", sample):
+            if re.search(asm_pat, sample, re.I) and re.search(r"0x[0-9a-fA-F]+", sample):
                 return "x86asm"
 
             # C-like: decompiled output with types, braces, semicolons
             c_indicators = 0
-            if _re.search(r"\b(void|int|char|uint\d+_t|int\d+_t|struct|enum|typedef)\b", sample):
+            if re.search(r"\b(void|int|char|uint\d+_t|int\d+_t|struct|enum|typedef)\b", sample):
                 c_indicators += 1
-            if _re.search(r"[{};]", sample):
+            if re.search(r"[{};]", sample):
                 c_indicators += 1
-            if _re.search(r"\b(if|while|for|return|switch)\s*\(", sample):
+            if re.search(r"\b(if|while|for|return|switch)\s*\(", sample):
                 c_indicators += 1
             if c_indicators >= 2:
                 return "c"
 
             # Python: def/import/class patterns
-            if _re.search(r"^(def |class |import |from .+ import |print\()", sample, _re.M):
+            if re.search(r"^(def |class |import |from .+ import |print\()", sample, re.M):
                 return "python"
 
             return ""
@@ -464,8 +465,8 @@ class RikuganPanelCore(QWidget):
         def _format_tool_result(tr) -> str:
             """Format tool result content with syntax highlighting."""
             content = tr.content
-            if len(content) > 2000:
-                content = content[:2000] + "\n... (truncated)"
+            if len(content) > _TOOL_RESULT_TRUNCATE_CHARS:
+                content = content[:_TOOL_RESULT_TRUNCATE_CHARS] + "\n... (truncated)"
             lang = _detect_lang(content, tr.name)
             return f"```{lang}\n{content}\n```"
 
