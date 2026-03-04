@@ -103,15 +103,15 @@ class UserMessageWidget(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
 
-        role_label = QLabel("You")
-        role_label.setStyleSheet("color: #4ec9b0; font-weight: bold; font-size: 11px;")
-        layout.addWidget(role_label)
+        self._role_label = QLabel("You")
+        self._role_label.setStyleSheet("color: #4ec9b0; font-weight: bold; font-size: 11px;")
+        layout.addWidget(self._role_label)
 
-        content = QLabel(text)
-        content.setWordWrap(True)
-        content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
-        content.setStyleSheet("color: #d4d4d4; font-size: 13px;")
-        layout.addWidget(content)
+        self._content = QLabel(text)
+        self._content.setWordWrap(True)
+        self._content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
+        self._content.setStyleSheet("color: #d4d4d4; font-size: 13px;")
+        layout.addWidget(self._content)
 
 
 # ---------------------------------------------------------------------------
@@ -231,9 +231,9 @@ class AssistantMessageWidget(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
 
-        role_label = QLabel("Rikugan")
-        role_label.setStyleSheet("color: #569cd6; font-weight: bold; font-size: 11px;")
-        layout.addWidget(role_label)
+        self._role_label = QLabel("Rikugan")
+        self._role_label.setStyleSheet("color: #569cd6; font-weight: bold; font-size: 11px;")
+        layout.addWidget(self._role_label)
 
         self._thinking_block = _ThinkingBlock()
         layout.addWidget(self._thinking_block)
@@ -347,22 +347,22 @@ class QueuedMessageWidget(QFrame):
 
         content_layout = QVBoxLayout()
 
-        role_label = QLabel("You")
-        role_label.setStyleSheet("color: #4ec9b0; font-weight: bold; font-size: 11px;")
-        content_layout.addWidget(role_label)
+        self._role_label = QLabel("You")
+        self._role_label.setStyleSheet("color: #4ec9b0; font-weight: bold; font-size: 11px;")
+        content_layout.addWidget(self._role_label)
 
-        content = QLabel(text)
-        content.setWordWrap(True)
-        content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
-        content.setStyleSheet("color: #d4d4d4; font-size: 13px;")
-        content_layout.addWidget(content)
+        self._content = QLabel(text)
+        self._content.setWordWrap(True)
+        self._content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
+        self._content.setStyleSheet("color: #d4d4d4; font-size: 13px;")
+        content_layout.addWidget(self._content)
 
         layout.addLayout(content_layout, 1)
 
-        badge = QLabel("[queued]")
-        badge.setStyleSheet("color: #808080; font-size: 10px; font-style: italic;")
-        badge.setAlignment(Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(badge)
+        self._badge = QLabel("[queued]")
+        self._badge.setStyleSheet("color: #808080; font-size: 10px; font-style: italic;")
+        self._badge.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self._badge)
 
 
 class UserQuestionWidget(QFrame):
@@ -382,15 +382,15 @@ class UserQuestionWidget(QFrame):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
 
-        header = QLabel("Rikugan asks:")
-        header.setStyleSheet("color: #dcdcaa; font-weight: bold; font-size: 11px;")
-        layout.addWidget(header)
+        self._header = QLabel("Rikugan asks:")
+        self._header.setStyleSheet("color: #dcdcaa; font-weight: bold; font-size: 11px;")
+        layout.addWidget(self._header)
 
-        q_label = QLabel(question)
-        q_label.setWordWrap(True)
-        q_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
-        q_label.setStyleSheet("color: #d4d4d4; font-size: 13px;")
-        layout.addWidget(q_label)
+        self._q_label = QLabel(question)
+        self._q_label.setWordWrap(True)
+        self._q_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
+        self._q_label.setStyleSheet("color: #d4d4d4; font-size: 13px;")
+        layout.addWidget(self._q_label)
 
         if options:
             btn_layout = QHBoxLayout()
@@ -443,17 +443,17 @@ class ExplorationPhaseWidget(QFrame):
         layout.setSpacing(6)
 
         icon = self._PHASE_ICONS.get(to_phase, "\u2192")
-        phase_label = QLabel(f"{icon}  Phase: {to_phase.upper()}")
-        phase_label.setStyleSheet(
+        self._phase_label = QLabel(f"{icon}  Phase: {to_phase.upper()}")
+        self._phase_label.setStyleSheet(
             "color: #d7ba7d; font-weight: bold; font-size: 11px;"
         )
-        layout.addWidget(phase_label)
+        layout.addWidget(self._phase_label)
 
         if reason:
-            reason_label = QLabel(reason)
-            reason_label.setWordWrap(True)
-            reason_label.setStyleSheet("color: #b0a070; font-size: 11px;")
-            layout.addWidget(reason_label, 1)
+            self._reason_label = QLabel(reason)
+            self._reason_label.setWordWrap(True)
+            self._reason_label.setStyleSheet("color: #b0a070; font-size: 11px;")
+            layout.addWidget(self._reason_label, 1)
 
 
 class ExplorationFindingWidget(QFrame):
@@ -483,23 +483,23 @@ class ExplorationFindingWidget(QFrame):
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(6)
 
-        cat_label = QLabel(f"[{category}]")
-        cat_label.setStyleSheet(
+        self._cat_label = QLabel(f"[{category}]")
+        self._cat_label.setStyleSheet(
             f"color: {color}; font-weight: bold; font-size: 10px;"
         )
-        layout.addWidget(cat_label)
+        layout.addWidget(self._cat_label)
 
         if address:
-            addr_label = QLabel(address)
-            addr_label.setStyleSheet(
+            self._addr_label = QLabel(address)
+            self._addr_label.setStyleSheet(
                 "color: #808080; font-family: monospace; font-size: 10px;"
             )
-            layout.addWidget(addr_label)
+            layout.addWidget(self._addr_label)
 
-        summary_label = QLabel(summary)
-        summary_label.setWordWrap(True)
-        summary_label.setStyleSheet("color: #d4d4d4; font-size: 11px;")
-        layout.addWidget(summary_label, 1)
+        self._summary_label = QLabel(summary)
+        self._summary_label.setWordWrap(True)
+        self._summary_label.setStyleSheet("color: #d4d4d4; font-size: 11px;")
+        layout.addWidget(self._summary_label, 1)
 
         if relevance == "high":
             rel_label = QLabel("\u2605")
@@ -519,12 +519,12 @@ class ErrorMessageWidget(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
 
-        header = QLabel("Error")
-        header.setStyleSheet("color: #f44747; font-weight: bold; font-size: 11px;")
-        layout.addWidget(header)
+        self._header = QLabel("Error")
+        self._header.setStyleSheet("color: #f44747; font-weight: bold; font-size: 11px;")
+        layout.addWidget(self._header)
 
-        content = QLabel(error_text)
-        content.setWordWrap(True)
-        content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
-        content.setStyleSheet("color: #f44747; font-size: 12px;")
-        layout.addWidget(content)
+        self._content = QLabel(error_text)
+        self._content.setWordWrap(True)
+        self._content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
+        self._content.setStyleSheet("color: #f44747; font-size: 12px;")
+        layout.addWidget(self._content)

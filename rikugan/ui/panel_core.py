@@ -302,8 +302,8 @@ class RikuganPanelCore(QWidget):
 
     def _build_input_section(self) -> QWidget:
         """Build the bottom input area with text field and action buttons."""
-        input_container = QWidget()
-        input_layout = QHBoxLayout(input_container)
+        self._input_container = QWidget()
+        input_layout = QHBoxLayout(self._input_container)
         input_layout.setContentsMargins(8, 4, 8, 4)
 
         self._input_area = InputArea()
@@ -313,7 +313,7 @@ class RikuganPanelCore(QWidget):
         self._ensure_skills_refresh_timer()
         input_layout.addWidget(self._input_area, 1)
         input_layout.addLayout(self._build_action_buttons())
-        return input_container
+        return self._input_container
 
     def _build_action_buttons(self) -> QVBoxLayout:
         """Build the vertical stack of action buttons (Send, Stop, New, etc.)."""

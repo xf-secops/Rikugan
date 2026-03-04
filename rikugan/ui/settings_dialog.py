@@ -211,16 +211,19 @@ class SettingsDialog(QDialog):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.addWidget(self._build_provider_group())
-        layout.addWidget(self._build_generation_group())
-        layout.addWidget(self._build_behavior_group())
+        self._provider_group = self._build_provider_group()
+        layout.addWidget(self._provider_group)
+        self._generation_group = self._build_generation_group()
+        layout.addWidget(self._generation_group)
+        self._behavior_group = self._build_behavior_group()
+        layout.addWidget(self._behavior_group)
 
-        buttons = QDialogButtonBox(
+        self._button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.accepted.connect(self._on_accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self._button_box.accepted.connect(self._on_accept)
+        self._button_box.rejected.connect(self.reject)
+        layout.addWidget(self._button_box)
 
         # Connect provider/key change signals AFTER everything is built
         self._provider_combo.currentTextChanged.connect(self._on_provider_changed)

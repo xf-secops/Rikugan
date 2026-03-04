@@ -75,9 +75,9 @@ class PlanView(QFrame):
         layout.setSpacing(4)
 
         # Header
-        header = QLabel("Plan")
-        header.setStyleSheet("color: #569cd6; font-weight: bold; font-size: 13px;")
-        layout.addWidget(header)
+        self._header = QLabel("Plan")
+        self._header.setStyleSheet("color: #569cd6; font-weight: bold; font-size: 13px;")
+        layout.addWidget(self._header)
 
         # Steps container
         self._steps_container = QVBoxLayout()

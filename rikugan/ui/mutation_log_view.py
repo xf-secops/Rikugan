@@ -29,29 +29,29 @@ class MutationEntryWidget(QFrame):
         layout.setContentsMargins(8, 4, 8, 4)
 
         # Reversibility indicator
-        indicator = QLabel("↩" if record.reversible else "⊘")
-        indicator.setFixedWidth(20)
-        indicator.setStyleSheet(
+        self._indicator = QLabel("↩" if record.reversible else "⊘")
+        self._indicator.setFixedWidth(20)
+        self._indicator.setStyleSheet(
             "color: #4ec9b0; font-size: 14px;" if record.reversible
             else "color: #808080; font-size: 14px;"
         )
-        indicator.setToolTip("Reversible" if record.reversible else "Not reversible")
-        layout.addWidget(indicator)
+        self._indicator.setToolTip("Reversible" if record.reversible else "Not reversible")
+        layout.addWidget(self._indicator)
 
         # Description
         ts = time.strftime("%H:%M:%S", time.localtime(record.timestamp))
-        desc = QLabel(f"[{ts}] {record.description}")
-        desc.setWordWrap(True)
-        desc.setStyleSheet("color: #d4d4d4; font-size: 11px;")
-        layout.addWidget(desc, 1)
+        self._desc = QLabel(f"[{ts}] {record.description}")
+        self._desc.setWordWrap(True)
+        self._desc.setStyleSheet("color: #d4d4d4; font-size: 11px;")
+        layout.addWidget(self._desc, 1)
 
         # Tool name badge
-        tool_badge = QLabel(record.tool_name)
-        tool_badge.setStyleSheet(
+        self._tool_badge = QLabel(record.tool_name)
+        self._tool_badge.setStyleSheet(
             "color: #808080; font-size: 10px; padding: 1px 4px; "
             "background: #2d2d2d; border-radius: 3px;"
         )
-        layout.addWidget(tool_badge)
+        layout.addWidget(self._tool_badge)
 
     @property
     def record(self) -> "MutationRecord":
@@ -72,14 +72,14 @@ class MutationLogPanel(QFrame):
         main_layout.setSpacing(0)
 
         # Header
-        header = QFrame()
-        header.setObjectName("mutation_log_header")
-        header_layout = QHBoxLayout(header)
+        self._header = QFrame()
+        self._header.setObjectName("mutation_log_header")
+        header_layout = QHBoxLayout(self._header)
         header_layout.setContentsMargins(12, 8, 12, 8)
 
-        title = QLabel("Mutation Log")
-        title.setStyleSheet("color: #d4d4d4; font-weight: bold; font-size: 12px;")
-        header_layout.addWidget(title)
+        self._title = QLabel("Mutation Log")
+        self._title.setStyleSheet("color: #d4d4d4; font-weight: bold; font-size: 12px;")
+        header_layout.addWidget(self._title)
 
         self._count_label = QLabel("0 mutations")
         self._count_label.setStyleSheet("color: #808080; font-size: 11px;")
@@ -99,13 +99,13 @@ class MutationLogPanel(QFrame):
         self._undo_btn.setEnabled(False)
         header_layout.addWidget(self._undo_btn)
 
-        main_layout.addWidget(header)
+        main_layout.addWidget(self._header)
 
         # Scroll area for entries
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
         self._entries_widget = QWidget()
         self._entries_layout = QVBoxLayout(self._entries_widget)
@@ -113,8 +113,8 @@ class MutationLogPanel(QFrame):
         self._entries_layout.setSpacing(2)
         self._entries_layout.addStretch()
 
-        scroll.setWidget(self._entries_widget)
-        main_layout.addWidget(scroll)
+        self._scroll.setWidget(self._entries_widget)
+        main_layout.addWidget(self._scroll)
 
         self._entries: List[MutationEntryWidget] = []
 

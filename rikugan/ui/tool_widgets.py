@@ -532,6 +532,7 @@ class ToolBatchWidget(QFrame):
         self._tool_call_ids: List[str] = []
         self._results: Dict[str, str] = {}
         self._errors: Dict[str, str] = {}
+        self._entry_labels: List[QLabel] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 3, 6, 3)
@@ -609,6 +610,7 @@ class ToolBatchWidget(QFrame):
         entry = QLabel(f"#{self._count}: {summary}" if summary else f"#{self._count}")
         entry.setStyleSheet("color: #808080; font-family: monospace; font-size: 10px;")
         entry.setWordWrap(True)
+        self._entry_labels.append(entry)  # prevent Shiboken GC
         self._detail_layout.addWidget(entry)
 
     def set_args_for_call(self, tool_call_id: str, args_text: str) -> None:
@@ -847,16 +849,16 @@ class ToolApprovalWidget(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
 
-        header = QLabel("Approve execute_python?")
-        header.setStyleSheet("color: #dcdcaa; font-weight: bold; font-size: 11px;")
-        layout.addWidget(header)
+        self._header = QLabel("Approve execute_python?")
+        self._header.setStyleSheet("color: #dcdcaa; font-weight: bold; font-size: 11px;")
+        layout.addWidget(self._header)
 
         code = self._extract_code(args_text)
         code_lines = code.strip().splitlines() if code.strip() else []
 
-        info = QLabel(f"Python code — {len(code_lines)} line{'s' if len(code_lines) != 1 else ''}")
-        info.setStyleSheet("color: #808080; font-size: 10px;")
-        layout.addWidget(info)
+        self._info = QLabel(f"Python code — {len(code_lines)} line{'s' if len(code_lines) != 1 else ''}")
+        self._info.setStyleSheet("color: #808080; font-size: 10px;")
+        layout.addWidget(self._info)
 
         editor = self._build_code_editor(code, code_lines)
         if editor is not None:
