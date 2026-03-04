@@ -611,8 +611,8 @@ class RikuganPanelCore(QWidget):
             if runner:
                 runner.agent_loop.submit_user_answer(text)
             return
-        # Queue while a runner exists, even during startup before is_running flips true.
-        if self._ctrl.get_runner() is not None:
+        # Queue while the agent is actively running.
+        if self._ctrl.is_agent_running:
             self._ctrl.queue_message(text)
             chat_view.add_queued_message(text)
             return
