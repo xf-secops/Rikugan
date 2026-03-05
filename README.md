@@ -130,7 +130,7 @@ Runs in plan mode, so you can review the plan before the agent starts patching.
 
 |![](assets/cff_remove_example.gif)|
 |:--:|
-|2x speed of the workflow, original process took ~4:30 min
+|~3x speed of the workflow, original process took ~4:30 min
 
 ## Requirements
 
