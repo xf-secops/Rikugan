@@ -361,22 +361,39 @@ class AgentLoop:
         )
 
     def _resolve_skill(self, user_message: str) -> tuple:
-        """Rewrite user message if it starts with a /skill slug.
+        """Rewrite user message if it matches a skill.
+
+        Checks explicit /slug invocation first, then falls back to
+        trigger pattern matching on the user's natural language.
 
         Returns (rewritten_message, skill_or_None).
         """
         if not self.skills:
             return (user_message, None)
+
+        # 1. Explicit /slug invocation
         skill, remaining = self.skills.resolve_skill_invocation(user_message)
-        if skill is None:
-            return (user_message, None)
-        log_debug(f"AgentLoop: skill invocation /{skill.slug}")
-        rewritten = (
-            f"[Skill: {skill.name}]\n"
-            f"{sanitize_skill_body(skill.body, skill.name)}\n\n"
-            f"User request: {remaining}"
-        )
-        return (rewritten, skill)
+        if skill is not None:
+            log_debug(f"AgentLoop: skill invocation /{skill.slug}")
+            rewritten = (
+                f"[Skill: {skill.name}]\n"
+                f"{sanitize_skill_body(skill.body, skill.name)}\n\n"
+                f"User request: {remaining}"
+            )
+            return (rewritten, skill)
+
+        # 2. Trigger pattern matching on natural language
+        skill = self.skills.match_triggers(user_message)
+        if skill is not None:
+            log_debug(f"AgentLoop: trigger-matched skill /{skill.slug}")
+            rewritten = (
+                f"[Skill: {skill.name}]\n"
+                f"{sanitize_skill_body(skill.body, skill.name)}\n\n"
+                f"User request: {user_message}"
+            )
+            return (rewritten, skill)
+
+        return (user_message, None)
 
     @staticmethod
     def _parse_plan(text: str) -> List[str]:
@@ -439,7 +456,7 @@ class AgentLoop:
                 self.tools.execute(record.reverse_tool, record.reverse_arguments)
                 undone += 1
                 log_info(f"Undo: {record.description}")
-            except Exception as e:
+            except ToolError as e:
                 errors.append(f"Failed to undo {record.description}: {e}")
                 log_error(f"Undo failed: {record.description}: {e}")
 
