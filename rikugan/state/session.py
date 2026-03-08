@@ -6,10 +6,11 @@ import json
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Set
 
 from ..core.logging import log_debug
+from ..core.sanitize import strip_injection_markers
 from ..core.types import Message, Role, ToolResult, TokenUsage
 
 # ---------- Token estimation ----------
@@ -128,19 +129,40 @@ class SessionState:
         """Return messages sanitized and trimmed for the provider API.
 
         1. Ensures every tool_use has a matching tool_result.
-        2. Truncates old / large tool results.
-        3. Drops oldest messages if the estimated token count exceeds
+        2. Strips injection markers from assistant output (anti self-injection).
+        3. Truncates old / large tool results.
+        4. Drops oldest messages if the estimated token count exceeds
            the context window budget.
         """
         with self._lock:
             snapshot = list(self.messages)
         sanitized = self._sanitize(snapshot)
+        sanitized = self._sanitize_assistant_output(sanitized)
         sanitized = self._truncate_results(sanitized)
         if context_window > 0:
             sanitized = self._trim_to_budget(sanitized, context_window)
         return sanitized
 
     # --- Internal helpers ---
+
+    @staticmethod
+    def _sanitize_assistant_output(messages: List[Message]) -> List[Message]:
+        """Strip injection markers from assistant text (anti self-injection).
+
+        The model may reconstruct filtered strings in its own response —
+        e.g. by reading raw bytes via hexdump and decoding them to ASCII.
+        This prevents those strings from re-entering the context on
+        subsequent turns while leaving the displayed message untouched.
+        """
+        result: List[Message] = []
+        for msg in messages:
+            if msg.role == Role.ASSISTANT and msg.content:
+                cleaned = strip_injection_markers(msg.content)
+                if cleaned != msg.content:
+                    result.append(replace(msg, content=cleaned))
+                    continue
+            result.append(msg)
+        return result
 
     @staticmethod
     def _sanitize(msgs: List[Message]) -> List[Message]:

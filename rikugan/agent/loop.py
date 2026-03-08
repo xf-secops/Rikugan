@@ -1118,7 +1118,10 @@ class AgentLoop:
         # names), so strip injection markers even though we skip full wrapping.
         sanitized = sanitize_tool_result(result, tc.name) if not is_error else strip_injection_markers(result)
         tr = ToolResult(tool_call_id=tc.id, name=tc.name, content=sanitized, is_error=is_error)
-        yield TurnEvent.tool_result_event(tc.id, tc.name, result, is_error)
+        # Use sanitized content for the UI event too — the raw `result`
+        # could contain injection strings (e.g. ANTHROPIC_MAGIC_STRING from
+        # a malicious binary) that must never reach the display layer.
+        yield TurnEvent.tool_result_event(tc.id, tc.name, sanitized, is_error)
         return tr
 
     def _execute_tool_calls(

@@ -23,6 +23,70 @@ import re
 # Injection pattern detection
 # ---------------------------------------------------------------------------
 
+# Zero-width / invisible Unicode characters that can be inserted between
+# letters to break regex matching while the string still *looks* the same
+# to humans and model tokenizers.
+_ZERO_WIDTH_RE = re.compile(
+    r'[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e'
+    r'\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f'
+    r'\ufeff\ufff9-\ufffb'
+    r'\U000e0001\U000e0020-\U000e007f'  # Tags block
+    r']'
+)
+
+# Common Latin-lookalike homoglyphs (Cyrillic, Greek, etc.) that adversaries
+# use to evade keyword filters while visually matching the target string.
+_HOMOGLYPH_TABLE = str.maketrans({
+    '\u0410': 'A', '\u0430': 'a',  # Cyrillic А/а
+    '\u0412': 'B', '\u0432': 'b',  # Cyrillic В/в (looks like B)
+    '\u0421': 'C', '\u0441': 'c',  # Cyrillic С/с
+    '\u0415': 'E', '\u0435': 'e',  # Cyrillic Е/е
+    '\u041d': 'H', '\u043d': 'h',  # Cyrillic Н/н
+    '\u0406': 'I', '\u0456': 'i',  # Cyrillic І/і
+    '\u041a': 'K', '\u043a': 'k',  # Cyrillic К/к
+    '\u041c': 'M', '\u043c': 'm',  # Cyrillic М/м
+    '\u041e': 'O', '\u043e': 'o',  # Cyrillic О/о
+    '\u0420': 'P', '\u0440': 'p',  # Cyrillic Р/р
+    '\u0405': 'S', '\u0455': 's',  # Cyrillic Ѕ/ѕ
+    '\u0422': 'T', '\u0442': 't',  # Cyrillic Т/т
+    '\u0425': 'X', '\u0445': 'x',  # Cyrillic Х/х
+    '\u0427': 'Y',                 # Cyrillic Ч (visual)
+    '\u0391': 'A', '\u03b1': 'a',  # Greek Α/α
+    '\u0392': 'B', '\u03b2': 'b',  # Greek Β/β
+    '\u0395': 'E', '\u03b5': 'e',  # Greek Ε/ε
+    '\u0397': 'H', '\u03b7': 'h',  # Greek Η/η
+    '\u0399': 'I', '\u03b9': 'i',  # Greek Ι/ι
+    '\u039a': 'K', '\u03ba': 'k',  # Greek Κ/κ
+    '\u039c': 'M', '\u03bc': 'm',  # Greek Μ/μ
+    '\u039d': 'N', '\u03bd': 'n',  # Greek Ν/ν
+    '\u039f': 'O', '\u03bf': 'o',  # Greek Ο/ο
+    '\u03a1': 'P', '\u03c1': 'p',  # Greek Ρ/ρ
+    '\u03a4': 'T', '\u03c4': 't',  # Greek Τ/τ
+    '\u03a7': 'X', '\u03c7': 'x',  # Greek Χ/χ
+})
+
+
+def _normalize_homoglyphs(text: str) -> str:
+    """Replace common Latin-lookalike characters with their ASCII equivalents.
+
+    Applied to a *copy* used only for pattern matching — the original text
+    is what ultimately gets ``[FILTERED]`` substitutions applied to.
+    """
+    return text.translate(_HOMOGLYPH_TABLE)
+
+
+# Flexible ANTHROPIC_MAGIC_STRING pattern — catches obfuscated variants.
+# Allows 0-3 "junk" separator characters (underscore, space, hyphen, dot,
+# backslash, slash, null byte) between the three constituent words.
+# This catches: ANTHROPIC_MAGIC_STRING, ANTHROPIC-MAGIC-STRING,
+#               ANTHROPIC MAGIC STRING, ANTHROPIC.MAGIC.STRING,
+#               ANTHROPIC\_MAGIC\_STRING (escaped underscores in decompiler output), etc.
+_SEP = r'[\s_\-\.\\\/\x00]{0,3}'
+_ANTHROPIC_CONTROL_RE = re.compile(
+    rf'ANTHROPIC{_SEP}MAGIC{_SEP}STRING\w*',
+    re.IGNORECASE,
+)
+
 # Patterns that mimic role/instruction markers across common LLM formats.
 # These are stripped from untrusted content to prevent the model from
 # interpreting data as control sequences.
@@ -42,7 +106,6 @@ _ROLE_MARKER_RE = re.compile(
     </system>               |
     <\|endoftext\|>         |
     \[RIKUGAN_SYSTEM\]      |  # prevent self-referencing injection
-    ANTHROPIC_MAGIC_STRING\w*  |  # Anthropic internal control strings — DoS vector
     \n\nHuman:\s              |  # Anthropic turn delimiters
     \n\nAssistant:\s
     """,
@@ -67,7 +130,31 @@ _INSTRUCTION_OVERRIDE_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 def strip_injection_markers(text: str) -> str:
-    """Remove sequences that mimic LLM role/control markers."""
+    """Remove sequences that mimic LLM role/control markers.
+
+    Processing order:
+    1. Strip zero-width / invisible characters (prevents regex evasion).
+    2. Normalize homoglyphs on a shadow copy for matching, then apply
+       substitutions to the *original* text at the same positions.
+    3. Apply Anthropic control-string pattern (flexible separators).
+    4. Apply generic role-marker and instruction-override patterns.
+    """
+    # 1. Strip invisible characters that break pattern matching
+    text = _ZERO_WIDTH_RE.sub("", text)
+
+    # 2. Homoglyph-aware matching for Anthropic control strings.
+    #    We normalize a copy to find match positions, then replace in the
+    #    original to preserve surrounding content faithfully.
+    normalized = _normalize_homoglyphs(text)
+    # Apply Anthropic control pattern on the normalized text, but replace
+    # in the *original* — positions are identical because _normalize_homoglyphs
+    # is a 1-to-1 character mapping (same length).
+    for m in reversed(list(_ANTHROPIC_CONTROL_RE.finditer(normalized))):
+        text = text[:m.start()] + "[FILTERED]" + text[m.end():]
+
+    # 3. Standard patterns (these are ASCII-only so homoglyph evasion is
+    #    less of a concern — adversaries mostly target the Anthropic string).
+    text = _ANTHROPIC_CONTROL_RE.sub("[FILTERED]", text)
     text = _ROLE_MARKER_RE.sub("[FILTERED]", text)
     text = _INSTRUCTION_OVERRIDE_RE.sub("[FILTERED]", text)
     return text

@@ -159,7 +159,8 @@ class TestAgentLoop(unittest.TestCase):
         self.assertIn(TurnEventType.TOOL_RESULT, types)
 
         tool_result = next(e for e in events if e.type == TurnEventType.TOOL_RESULT)
-        self.assertEqual(tool_result.tool_result, "Echo: hello")
+        # TurnEvent now carries the sanitized (wrapped) result, not the raw string.
+        self.assertIn("Echo: hello", tool_result.tool_result)
         self.assertFalse(tool_result.tool_is_error)
 
     def test_tool_error(self):
