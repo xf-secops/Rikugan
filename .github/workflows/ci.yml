@@ -8,6 +8,10 @@ on:
       - "tests/**/*.py"
       - ".github/workflows/ci.yml"
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   lint:
     name: Ruff
@@ -133,11 +137,11 @@ jobs:
 
       - name: Post findings comment
         if: always()
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const { execSync } = require('child_process');
             let body = '';
             try {
               const changed = fs.readFileSync('/tmp/changed_files.txt', 'utf8').trim().split('\n').filter(Boolean);
