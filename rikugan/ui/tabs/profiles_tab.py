@@ -54,6 +54,7 @@ class ProfilesTab(QWidget):
         self._config = config
         self._tool_registry = tool_registry
         self._custom_profiles: Dict[str, Dict] = copy.deepcopy(config.custom_profiles)
+        self._displayed_profile: str = ""  # tracks which profile the UI fields show
         self._build_ui()
         self._load_profile(self._profile_combo.currentText())
 
@@ -328,6 +329,7 @@ class ProfilesTab(QWidget):
         self._load_profile(name)
 
     def _load_profile(self, name: str) -> None:
+        self._displayed_profile = name
         profile = get_profile(name, self._custom_profiles)
         is_builtin = name in _BUILTIN_PROFILES
 
@@ -382,14 +384,14 @@ class ProfilesTab(QWidget):
         return []
 
     def _get_current_rules(self) -> List[Dict[str, Any]]:
-        name = self._profile_combo.currentText()
+        name = self._displayed_profile
         if not name:
             return []
         profile = get_profile(name, self._custom_profiles)
         return list(profile.custom_filter_rules)
 
     def _save_current_to_working_copy(self) -> None:
-        name = self._profile_combo.currentText()
+        name = self._displayed_profile
         if not name or name in _BUILTIN_PROFILES:
             return
 

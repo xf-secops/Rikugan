@@ -67,6 +67,9 @@ There are 60+ tools available to the agent, covering:
 - Annotations (retype, rename, comments)
 - IL reading/writing (Binary Ninja's LLIL/MLIL/HLIL) — read IL at any level, modify expressions, force branches, NOP instructions, patch bytes, register pipeline transforms
 - Scripting to extend its capabilities (Binary Ninja Python and IDAPython)
+- Analysis profiles
+  - Profiles let you define what data the LLM can access, restrict which tools it can use, and create custom rules and prompts — especially useful for private analysis and research.
+- Reuse MCP servers and skills from Claude Code and OpenAI's Codex.
 
 Tool details can be found in the [ARCHITECTURE.md](ARCHITECTURE.md) document. You can use these tools to do things like:
 
@@ -169,7 +172,6 @@ Runs in plan mode, so you can review the plan before the agent starts patching.
 > **IDA Pro + Python > 3.10 warning:** IDA Pro's Qt/PySide6 binding (Shiboken) has a known Use-After-Free bug that can cause crashes when Python > 3.10 is used. The issue is triggered by Shiboken's `__import__` hook during Qt signal dispatch — Rikugan works around this by routing all `ida_*` imports through `importlib.import_module()` and installing a re-entrancy guard on `builtins.__import__`. That said, Python 3.10 is still the safest choice for IDA Pro. See the [upstream report](https://community.hex-rays.com/t/ida-9-3-b1-macos-arm64-uaf-crash/646) for details.
 
 
-
 ## Manual install
 
 Clone this repository, then run the installer for your target host:
@@ -238,9 +240,11 @@ The `execute_python` tool always asks for your permission before running. You se
 
 ![alt text](assets/approval_example.png)
 
-### Message queuing
+### Profiles
 
-You can send messages while the agent is working. They appear as `[queued]` in the chat and auto-submit when the current turn finishes. Hit **Stop** to cancel the running turn and discard all queued messages.
+Profiles let you customize the agent to fit your analysis needs. They give you granular control over which data the LLM can read, restrict which tools it can use, and let you define custom rules to filter data.
+
+![alt text](/assets/profile.png)
 
 ### Quick actions
 
@@ -262,18 +266,6 @@ Binary Ninja exposes equivalent commands under **Tools → Rikugan** and address
 ### Skills
 
 Skills are reusable analysis workflows. Type `/` in the input area to see available skills with autocomplete.
-
-| Skill | Description |
-|-------|-------------|
-| `/malware-analysis` | Windows PE malware — kill chain, IOC extraction, MITRE ATT&CK mapping |
-| `/linux-malware` | ELF malware — packing, persistence, IOC extraction |
-| `/deobfuscation` | String decryption, CFF removal, opaque predicates, MBA simplification |
-| `/vuln-audit` | Buffer overflows, format strings, integer issues, memory safety |
-| `/driver-analysis` | Windows kernel drivers — DriverEntry, dispatch table, IOCTL handlers |
-| `/ctf` | Capture-the-flag challenges — find the flag efficiently |
-| `/generic-re` | General-purpose binary understanding |
-| `/ida-scripting` | IDAPython API reference for writing scripts |
-| `/binja-scripting` | Binary Ninja Python API reference for writing scripts |
 
 Create custom skills in:
 
@@ -316,6 +308,13 @@ Task: <instruction for the agent>
 
 The `allowed_tools` field is optional — when set, the agent can only use those tools while the skill is active.
 
+### Supported agents
+
+Rikugan supports pre-built skills from Claude Code and Codex. Go to Settings → Skills tab and choose which ones to enable.
+
+![alt text](/assets/skills_settings.png)
+
+
 ### MCP Servers
 
 Connect external MCP servers to extend Rikugan with additional tools. Create the config file at:
@@ -340,6 +339,12 @@ Connect external MCP servers to extend Rikugan with additional tools. Create the
 ```
 
 MCP servers are started when the plugin loads. Their tools appear alongside built-in ones with the prefix `mcp_<server>_<tool>` — the agent sees them in the tool list and can call them like any other tool. Set `"enabled": false` to keep a server configured without starting it.
+
+### Supported agents
+
+Similar to skills, Rikugan also supports pre-configured MCP servers from Claude Code and Codex in Settings → MCP tab.
+
+
 
 ## Tools
 
