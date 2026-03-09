@@ -323,5 +323,238 @@ class TestSkillInvocation(unittest.TestCase):
             self.assertIn("do something", user_msg.content)
 
 
+class TestProfileEnforcement(unittest.TestCase):
+    """Test that analysis profiles are enforced in the agent loop."""
+
+    def _make_loop_with_profile(
+        self, profile_name: str, provider: MockProvider,
+        tools: ToolRegistry = None, custom_profiles: dict = None,
+    ) -> AgentLoop:
+        config = RikuganConfig()
+        config.auto_context = False
+        config.active_profile = profile_name
+        if custom_profiles:
+            config.custom_profiles = custom_profiles
+        session = SessionState(provider_name="mock", model_name="mock-model")
+        return AgentLoop(
+            provider=provider,
+            tool_registry=tools or ToolRegistry(),
+            config=config,
+            session=session,
+        )
+
+    def test_private_profile_skips_binary_info(self):
+        """Private profile should not call get_binary_info."""
+        config = RikuganConfig()
+        config.auto_context = True  # Enable auto-context
+        config.active_profile = "private"
+
+        registry = ToolRegistry()
+        calls = []
+
+        def track_binary_info():
+            calls.append("get_binary_info")
+            return "Binary: test.exe"
+
+        registry.register(ToolDefinition(
+            name="get_binary_info",
+            description="Get binary info",
+            parameters=[],
+            handler=track_binary_info,
+            category="context",
+        ))
+
+        provider = MockProvider(responses=[_text_response("Done")])
+        session = SessionState(provider_name="mock", model_name="mock-model")
+        loop = AgentLoop(provider, registry, config, session)
+
+        list(loop.run("Hi"))
+        # get_binary_info should NOT have been called because private profile hides metadata
+        self.assertEqual(calls, [])
+
+    def test_ioc_stripping_in_tool_results(self):
+        """ioc_filters should strip hashes/IPs from tool results."""
+        registry = ToolRegistry()
+        registry.register(ToolDefinition(
+            name="test_tool",
+            description="Returns IOC data",
+            parameters=[],
+            handler=lambda: "Hash: d41d8cd98f00b204e9800998ecf8427e, IP: 10.0.0.1",
+            category="test",
+        ))
+
+        # Use private profile which has all ioc_filters enabled
+        config = RikuganConfig()
+        config.auto_context = False
+        config.active_profile = "private"
+        session = SessionState(provider_name="mock", model_name="mock-model")
+
+        provider = MockProvider(responses=[
+            _tool_call_response("test_tool", {}, call_id="call_ioc"),
+            _text_response("Done"),
+        ])
+        loop = AgentLoop(provider, registry, config, session)
+
+        events = list(loop.run("Run test"))
+        tool_result_event = next(
+            (e for e in events if e.type == TurnEventType.TOOL_RESULT),
+            None,
+        )
+        self.assertIsNotNone(tool_result_event)
+        # IOCs should be redacted
+        self.assertIn("[HASH_REDACTED]", tool_result_event.tool_result)
+        self.assertIn("[IP_REDACTED]", tool_result_event.tool_result)
+
+    def test_denied_tools_filtered_from_schema(self):
+        """Denied tools should not appear in the tools schema."""
+        registry = ToolRegistry()
+        registry.register(ToolDefinition(
+            name="allowed_tool",
+            description="Allowed",
+            parameters=[],
+            handler=lambda: "ok",
+            category="test",
+        ))
+        registry.register(ToolDefinition(
+            name="denied_tool",
+            description="Denied",
+            parameters=[],
+            handler=lambda: "ok",
+            category="test",
+        ))
+
+        custom_profiles = {
+            "restricted": {
+                "name": "restricted",
+                "denied_tools": ["denied_tool"],
+            }
+        }
+
+        provider = MockProvider(responses=[_text_response("Done")])
+        loop = self._make_loop_with_profile(
+            "restricted", provider, tools=registry, custom_profiles=custom_profiles,
+        )
+
+        schema = loop._build_tools_schema(None, False)
+        tool_names = [t.get("function", {}).get("name") for t in schema]
+        self.assertIn("allowed_tool", tool_names)
+        self.assertNotIn("denied_tool", tool_names)
+
+    def test_granular_ioc_filter_only_selected(self):
+        """Only selected IOC categories should be redacted."""
+        registry = ToolRegistry()
+        registry.register(ToolDefinition(
+            name="test_tool",
+            description="Returns mixed IOCs",
+            parameters=[],
+            handler=lambda: "Hash: d41d8cd98f00b204e9800998ecf8427e, IP: 10.0.0.1, url: http://evil.com/bad",
+            category="test",
+        ))
+
+        # Custom profile with only hashes enabled
+        custom_profiles = {
+            "hash-only": {
+                "name": "hash-only",
+                "ioc_filters": {"hashes": True, "ipv4": False, "urls": False},
+            }
+        }
+        config = RikuganConfig()
+        config.auto_context = False
+        config.active_profile = "hash-only"
+        config.custom_profiles = custom_profiles
+        session = SessionState(provider_name="mock", model_name="mock-model")
+
+        provider = MockProvider(responses=[
+            _tool_call_response("test_tool", {}, call_id="call_granular"),
+            _text_response("Done"),
+        ])
+        loop = AgentLoop(provider, registry, config, session)
+
+        events = list(loop.run("Run test"))
+        tool_result_event = next(
+            (e for e in events if e.type == TurnEventType.TOOL_RESULT),
+            None,
+        )
+        self.assertIsNotNone(tool_result_event)
+        self.assertIn("[HASH_REDACTED]", tool_result_event.tool_result)
+        # IP and URL should NOT be redacted
+        self.assertIn("10.0.0.1", tool_result_event.tool_result)
+        self.assertIn("http://evil.com/bad", tool_result_event.tool_result)
+
+    def test_custom_filter_rule_in_tool_result(self):
+        """Custom filter rules should be applied to tool results."""
+        registry = ToolRegistry()
+        registry.register(ToolDefinition(
+            name="test_tool",
+            description="Returns sensitive data",
+            parameters=[],
+            handler=lambda: "hostname: DESKTOP-VICTIM, key: sk-abcdef1234567890",
+            category="test",
+        ))
+
+        custom_profiles = {
+            "custom-rules": {
+                "name": "custom-rules",
+                "ioc_filters": {},
+                "custom_filter_rules": [
+                    {"name": "host", "pattern": "DESKTOP-VICTIM", "is_regex": False, "replacement": "[HOST]"},
+                    {"name": "key", "pattern": r"sk-[a-zA-Z0-9]+", "is_regex": True, "replacement": "[KEY]"},
+                ],
+            }
+        }
+        config = RikuganConfig()
+        config.auto_context = False
+        config.active_profile = "custom-rules"
+        config.custom_profiles = custom_profiles
+        session = SessionState(provider_name="mock", model_name="mock-model")
+
+        provider = MockProvider(responses=[
+            _tool_call_response("test_tool", {}, call_id="call_custom"),
+            _text_response("Done"),
+        ])
+        loop = AgentLoop(provider, registry, config, session)
+
+        events = list(loop.run("Run test"))
+        tool_result_event = next(
+            (e for e in events if e.type == TurnEventType.TOOL_RESULT),
+            None,
+        )
+        self.assertIsNotNone(tool_result_event)
+        self.assertIn("[HOST]", tool_result_event.tool_result)
+        self.assertIn("[KEY]", tool_result_event.tool_result)
+        self.assertNotIn("DESKTOP-VICTIM", tool_result_event.tool_result)
+
+    def test_default_profile_no_filtering(self):
+        """Default profile should not strip IOCs or hide metadata."""
+        registry = ToolRegistry()
+        registry.register(ToolDefinition(
+            name="test_tool",
+            description="Returns data",
+            parameters=[],
+            handler=lambda: "Hash: d41d8cd98f00b204e9800998ecf8427e",
+            category="test",
+        ))
+
+        config = RikuganConfig()
+        config.auto_context = False
+        config.active_profile = "default"
+        session = SessionState(provider_name="mock", model_name="mock-model")
+
+        provider = MockProvider(responses=[
+            _tool_call_response("test_tool", {}, call_id="call_def"),
+            _text_response("Done"),
+        ])
+        loop = AgentLoop(provider, registry, config, session)
+
+        events = list(loop.run("Run test"))
+        tool_result_event = next(
+            (e for e in events if e.type == TurnEventType.TOOL_RESULT),
+            None,
+        )
+        self.assertIsNotNone(tool_result_event)
+        # Default profile does NOT strip IOCs
+        self.assertNotIn("[HASH_REDACTED]", tool_result_event.tool_result)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -32,7 +32,7 @@ from .exploration_mode import (
     KnowledgeBase, PatchRecord,
 )
 from .minify import minify_text, minify_messages
-from ..core.sanitize import sanitize_tool_result, sanitize_skill_body, strip_injection_markers
+from ..core.sanitize import sanitize_tool_result, sanitize_skill_body, strip_injection_markers, strip_iocs
 from ..state.session import SessionState
 
 # Minimum acceptable context window; smaller values get flagged by /doctor.
@@ -326,11 +326,12 @@ class AgentLoop:
                 continue  # poll timeout — retry until item arrives or cancelled
 
     def _build_system_prompt(self) -> str:
+        profile = self.config.get_active_profile()
         binary_info = None
         current_address = None
         current_function = None
 
-        if self.config.auto_context:
+        if self.config.auto_context and not profile.hide_binary_metadata:
             try:
                 binary_info = self.tools.execute("get_binary_info", {})
             except Exception as e:
@@ -358,6 +359,7 @@ class AgentLoop:
             tool_names=self.tools.list_names(),
             skill_summary=skill_summary,
             idb_dir=idb_dir,
+            profile=profile,
         )
 
     def _resolve_skill(self, user_message: str) -> tuple:
@@ -1117,6 +1119,12 @@ class AgentLoop:
         # Error messages may contain attacker-controlled content (e.g. function
         # names), so strip injection markers even though we skip full wrapping.
         sanitized = sanitize_tool_result(result, tc.name) if not is_error else strip_injection_markers(result)
+
+        # Profile: strip IOCs from tool results when any IOC filter is enabled
+        profile = self.config.get_active_profile()
+        if profile.has_any_ioc_filter:
+            sanitized = strip_iocs(sanitized, profile.ioc_filters, profile.custom_filter_rules)
+
         tr = ToolResult(tool_call_id=tc.id, name=tc.name, content=sanitized, is_error=is_error)
         # Use sanitized content for the UI event too — the raw `result`
         # could contain injection strings (e.g. ANTHROPIC_MAGIC_STRING from
@@ -1159,6 +1167,15 @@ class AgentLoop:
             tools_schema = [
                 t for t in tools_schema
                 if t.get("function", {}).get("name") in allowed
+            ]
+
+        # Profile: remove denied tools
+        profile = self.config.get_active_profile()
+        if profile.denied_tools:
+            denied = set(profile.denied_tools)
+            tools_schema = [
+                t for t in tools_schema
+                if t.get("function", {}).get("name") not in denied
             ]
 
         # activate_skill: dynamic because the slug enum depends on loaded skills

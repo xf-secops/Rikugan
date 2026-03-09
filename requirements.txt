@@ -6,5 +6,8 @@ google-genai>=1.0.0
 # MCP client support
 mcp>=1.0.0
 
+# TOML parsing (stdlib tomllib backport for Python <3.11, e.g. IDA Pro 9.x)
+tomli>=2.0.0
+
 # IDA Pro deobfuscation skill (optional, IDA only)
 ida-domain>=0.1.0

@@ -39,6 +39,16 @@ class MCPManager:
         log_info(f"MCP config: {len(enabled)} enabled servers out of {len(self._configs)} total")
         return len(enabled)
 
+    def add_external_configs(self, configs: List[MCPServerConfig]) -> None:
+        """Append additional MCP server configs (from external sources).
+
+        These are added to ``_configs`` before ``start_servers()`` is called.
+        """
+        if not configs:
+            return
+        self._configs.extend(configs)
+        log_info(f"MCP: added {len(configs)} external server config(s)")
+
     def start_servers(
         self,
         registry: ToolRegistry,

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (  # noqa: F401
     QDoubleSpinBox, QCheckBox, QGroupBox, QFormLayout,
     QToolButton, QSizePolicy, QTabWidget, QTabBar,
     QFileDialog, QMenu, QMessageBox,
+    QListWidget, QListWidgetItem,
 )
 
 QT_BINDING = "PySide6"

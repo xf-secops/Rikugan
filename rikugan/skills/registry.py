@@ -51,6 +51,48 @@ class SkillRegistry:
         log_info(f"Total skills available: {len(self._skills)}")
         return len(self._skills)
 
+    def load_external_skills(
+        self,
+        enabled_ids: List[str],
+        disabled_slugs: List[str],
+    ) -> None:
+        """Load enabled external skills and apply disabled slugs.
+
+        Parameters
+        ----------
+        enabled_ids : list of str
+            External skill IDs to enable (format: ``"source:slug"``).
+        disabled_slugs : list of str
+            Rikugan skill slugs to disable (remove from registry).
+        """
+        from ..core.external_sources import discover_all_external_skills
+
+        # Remove disabled Rikugan skills
+        for slug in disabled_slugs:
+            if slug in self._skills:
+                del self._skills[slug]
+                log_debug(f"Disabled skill: /{slug}")
+
+        if not enabled_ids:
+            return
+
+        # Build a set for O(1) lookup
+        enabled_set = set(enabled_ids)
+
+        # Discover external skills
+        external = discover_all_external_skills()
+        loaded = 0
+        for source_key, skills in external.items():
+            for skill in skills:
+                ext_id = f"{source_key}:{skill.slug}"
+                if ext_id in enabled_set:
+                    self._skills[skill.slug] = skill
+                    loaded += 1
+                    log_debug(f"Loaded external skill: {ext_id}")
+
+        if loaded:
+            log_info(f"Loaded {loaded} external skills")
+
     def get(self, slug: str) -> Optional[SkillDefinition]:
         return self._skills.get(slug)
 

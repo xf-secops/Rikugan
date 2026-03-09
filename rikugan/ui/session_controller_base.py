@@ -81,9 +81,25 @@ class SessionControllerBase:
                 return
             self._skill_registry.discover()
 
+            # Apply disabled skills + load enabled external skills
+            self._skill_registry.load_external_skills(
+                self.config.enabled_external_skills,
+                self.config.disabled_skills,
+            )
+
             if self._runtime_shutdown.is_set():
                 return
             self._mcp_manager.load_config()
+
+            # Load enabled external MCP servers
+            from ..core.external_sources import discover_all_external_mcp
+            external_mcp = discover_all_external_mcp()
+            enabled_set = set(self.config.enabled_external_mcp)
+            if enabled_set:
+                for source_key, servers in external_mcp.items():
+                    enabled = [s for s in servers if f"{source_key}:{s.name}" in enabled_set]
+                    if enabled:
+                        self._mcp_manager.add_external_configs(enabled)
 
             if self._runtime_shutdown.is_set():
                 return

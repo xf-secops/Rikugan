@@ -51,6 +51,15 @@ class RikuganConfig:
     silent_retry_mode: bool = False  # show loading indicator instead of error messages on retry
     theme: str = "dark"
 
+    # Skills & MCP external integration
+    disabled_skills: List[str] = field(default_factory=list)
+    enabled_external_skills: List[str] = field(default_factory=list)
+    enabled_external_mcp: List[str] = field(default_factory=list)
+
+    # Analysis profiles
+    active_profile: str = "default"
+    custom_profiles: Dict[str, Dict] = field(default_factory=dict)
+
     _config_dir: str = field(default_factory=_default_config_dir, repr=False)
 
     @property
@@ -80,6 +89,14 @@ class RikuganConfig:
             errors.append(f"context_window must be positive, got {self.provider.context_window}")
         if not (1 <= self.max_retries <= 10):
             errors.append(f"max_retries {self.max_retries} out of range [1, 10]")
+        if not self.active_profile or not isinstance(self.active_profile, str):
+            errors.append("active_profile must be a non-empty string")
+        if not isinstance(self.custom_profiles, dict):
+            errors.append("custom_profiles must be a dict")
+        else:
+            for k, v in self.custom_profiles.items():
+                if not isinstance(v, dict):
+                    errors.append(f"custom_profiles['{k}'] must be a dict")
         return errors
 
     def save(self) -> None:
@@ -118,7 +135,10 @@ class RikuganConfig:
         for k in ("auto_context", "plan_mode_default",
                    "checkpoint_auto_save", "approve_mutations",
                    "exploration_turn_limit", "max_retries",
-                   "silent_retry_mode", "theme"):
+                   "silent_retry_mode", "theme",
+                   "disabled_skills", "enabled_external_skills",
+                   "enabled_external_mcp", "active_profile",
+                   "custom_profiles"):
             if k in data:
                 setattr(self, k, data[k])
 
@@ -171,6 +191,11 @@ class RikuganConfig:
 
     def is_custom_provider(self, name: str) -> bool:
         return name in self.custom_providers
+
+    def get_active_profile(self) -> "AnalysisProfile":
+        """Return the currently active AnalysisProfile."""
+        from .profile import AnalysisProfile, get_profile
+        return get_profile(self.active_profile, self.custom_profiles)
 
     @classmethod
     def load_or_create(cls) -> "RikuganConfig":

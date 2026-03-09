@@ -22,7 +22,8 @@
       "openai>=1.50.0",
       "google-genai>=1.0.0",
       "mcp>=1.0.0",
-      "ida-domain>=0.1.0"
+      "ida-domain>=0.1.0",
+      "tomli>=2.0.0"
     ],
     "keywords": [
       "ai",

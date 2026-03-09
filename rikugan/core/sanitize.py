@@ -296,6 +296,339 @@ def sanitize_skill_body(content: str, skill_name: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# IOC stripping — for private analysis profiles
+# ---------------------------------------------------------------------------
+
+from typing import Any, Callable, Dict, List, Optional
+
+# SHA256 (64 hex), SHA1 (40 hex), MD5 (32 hex)
+# Negative lookbehind: skip hex addresses (0x...), IDA names (sub_, loc_, unk_)
+_HASH_RE = re.compile(
+    r'(?<![0-9a-fA-Fx])(?<!sub_)(?<!loc_)(?<!unk_)(?<!off_)(?<!dword_)(?<!byte_)(?<!word_)'
+    r'\b([0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})\b'
+    r'(?![0-9a-fA-F])'
+)
+
+# IPv4 — validated octets 0-255, word-bounded
+_IPV4_RE = re.compile(
+    r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
+)
+
+# IPv6 — common forms (full, compressed with ::, mixed IPv4)
+_IPV6_RE = re.compile(
+    r'(?:'
+    r'(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}'  # full
+    r'|'
+    r'(?:[0-9a-fA-F]{1,4}:){1,7}:'                 # trailing ::
+    r'|'
+    r'(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}' # embedded ::
+    r'|'
+    r'::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}' # leading ::
+    r'|'
+    r'::1'                                            # loopback
+    r'|'
+    r'::'                                              # unspecified
+    r')'
+)
+
+# Domains — 2+ labels, TLD 2-6 chars, word-bounded
+_DOMAIN_RE = re.compile(
+    r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.){1,}'
+    r'[a-zA-Z]{2,6}\b'
+)
+
+# Common false-positive domains to exclude (programming/RE context)
+_DOMAIN_WHITELIST = frozenset({
+    "e.g", "i.e", "etc.com", "example.com", "example.org",
+    "microsoft.com", "google.com", "github.com",
+})
+
+# URLs — http, https, ftp schemes
+_URL_RE = re.compile(
+    r'(?:https?|ftp)://[^\s<>"\']+',
+    re.IGNORECASE,
+)
+
+# Windows registry keys
+_REGKEY_RE = re.compile(
+    r'(?:HKCU|HKLM|HKCR|HKU|HKCC)\\[^\s"\'<>,;]+',
+)
+
+# Windows file paths — drive letter or %ENV_VAR%\
+_WIN_PATH_RE = re.compile(
+    r'(?:[A-Za-z]:\\|%[A-Z_]+%\\)[^\s"\'<>,;]+',
+)
+
+# Unix file paths — common root directories
+_UNIX_PATH_RE = re.compile(
+    r'/(?:tmp|var|usr|etc|home|opt|root)/[^\s"\'<>,;]+',
+)
+
+# Email addresses
+_EMAIL_RE = re.compile(
+    r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}',
+)
+
+# Bitcoin wallets — bc1 (bech32), 1/3 (legacy/P2SH)
+_BTC_WALLET_RE = re.compile(
+    r'(?:bc1|[13])[a-km-zA-HJ-NP-Z1-9]{25,}',
+)
+
+# Ethereum wallets — 0x + 40 hex chars
+_ETH_WALLET_RE = re.compile(
+    r'0x[0-9a-fA-F]{40}\b',
+)
+
+# Mutexes — Global\ or Local\ prefix
+_MUTEX_RE = re.compile(
+    r'(?:Global|Local)\\[^\s"\'<>,;]+',
+)
+
+
+def _domain_replacer(m: re.Match) -> str:
+    domain = m.group(0).lower()
+    if domain in _DOMAIN_WHITELIST:
+        return m.group(0)
+    # Skip common file extensions that look like domains
+    if domain.endswith((".dll", ".exe", ".sys", ".bin", ".elf", ".so", ".dylib")):
+        return m.group(0)
+    return "[DOMAIN_REDACTED]"
+
+
+# Dispatch table: category → (callable that transforms text)
+# Order matters: urls must come before domains so full URLs are caught first.
+_IOC_STRIP_ORDER = [
+    "hashes", "urls", "emails", "ipv4", "ipv6", "domains",
+    "registry_keys", "file_paths", "crypto_wallets", "mutexes",
+]
+
+_IOC_STRIP_DISPATCH: Dict[str, Callable[[str], str]] = {
+    "hashes":        lambda t: _HASH_RE.sub("[HASH_REDACTED]", t),
+    "urls":          lambda t: _URL_RE.sub("[URL_REDACTED]", t),
+    "ipv4":          lambda t: _IPV4_RE.sub("[IP_REDACTED]", t),
+    "ipv6":          lambda t: _IPV6_RE.sub("[IP_REDACTED]", t),
+    "domains":       lambda t: _DOMAIN_RE.sub(_domain_replacer, t),
+    "registry_keys": lambda t: _REGKEY_RE.sub("[REGKEY_REDACTED]", t),
+    "file_paths":    lambda t: _WIN_PATH_RE.sub("[PATH_REDACTED]", _UNIX_PATH_RE.sub("[PATH_REDACTED]", t)),
+    "emails":        lambda t: _EMAIL_RE.sub("[EMAIL_REDACTED]", t),
+    "crypto_wallets": lambda t: _ETH_WALLET_RE.sub("[WALLET_REDACTED]", _BTC_WALLET_RE.sub("[WALLET_REDACTED]", t)),
+    "mutexes":       lambda t: _MUTEX_RE.sub("[MUTEX_REDACTED]", t),
+}
+
+
+def strip_iocs(
+    text: str,
+    filters: Optional[Dict[str, bool]] = None,
+    custom_rules: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """Replace IOCs with redaction markers.
+
+    Parameters
+    ----------
+    text : str
+        Text to sanitize.
+    filters : dict or None
+        Per-category enable flags (keys from IOC_FILTER_CATEGORIES).
+        ``None`` → apply ALL categories (backward compat).
+    custom_rules : list or None
+        User-defined filter rules. Each dict: ``{name, pattern, is_regex, replacement}``.
+    """
+    # Step 1: Sanitize hexdump blocks — LLMs can decode hex bytes to
+    # reconstruct IOC strings, bypassing text-based regex.
+    text = _sanitize_hexdump_iocs(text, filters, custom_rules)
+
+    # Step 2: Normal text-based IOC stripping
+    for category in _IOC_STRIP_ORDER:
+        if filters is None or filters.get(category, False):
+            fn = _IOC_STRIP_DISPATCH.get(category)
+            if fn:
+                text = fn(text)
+
+    # Step 3: Apply custom rules last
+    if custom_rules:
+        for rule in custom_rules:
+            pattern = rule.get("pattern", "")
+            replacement = rule.get("replacement", "[CUSTOM_REDACTED]")
+            if not pattern:
+                continue
+            if rule.get("is_regex", False):
+                try:
+                    text = re.sub(pattern, replacement, text)
+                except re.error:
+                    pass  # skip broken user regex
+            else:
+                text = text.replace(pattern, replacement)
+
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Hexdump IOC sanitization — prevents bypass via hex-encoded IOC data
+# ---------------------------------------------------------------------------
+# An LLM can decode hex bytes (e.g. "31 39 32 2e 31 36 38" → "192.168")
+# to reconstruct IOC strings that text-based regex would catch in plain text.
+# This pre-processor detects hexdump-formatted blocks, decodes the raw bytes,
+# finds IOC positions using the same regex patterns, then zeros out the
+# matching bytes in the hex column and rebuilds the ASCII column.
+
+# Matches common hexdump line formats:
+#   0x100004028: 48 4b 4c 4d 5c 53 ...
+#   00000000  48 4b 4c 4d 5c 53 ...  |HKLM\S...|
+_HEXDUMP_LINE_RE = re.compile(
+    r'^'
+    r'(\s*(?:0x)?[0-9a-fA-F]{4,16}[:\s]\s*)'              # Group 1: address
+    r'((?:[0-9a-fA-F]{2}[\s]+){3,}[0-9a-fA-F]{2}[\s]*)'   # Group 2: hex bytes (4+)
+    r'(.*)$'                                                # Group 3: trailing
+)
+
+# IOC category → list of compiled regex patterns (used for position marking)
+_IOC_CATEGORY_PATTERNS: Dict[str, List[re.Pattern]] = {
+    "hashes":        [_HASH_RE],
+    "urls":          [_URL_RE],
+    "emails":        [_EMAIL_RE],
+    "ipv4":          [_IPV4_RE],
+    "ipv6":          [_IPV6_RE],
+    "domains":       [_DOMAIN_RE],
+    "registry_keys": [_REGKEY_RE],
+    "file_paths":    [_WIN_PATH_RE, _UNIX_PATH_RE],
+    "crypto_wallets": [_BTC_WALLET_RE, _ETH_WALLET_RE],
+    "mutexes":       [_MUTEX_RE],
+}
+
+
+def _parse_hexdump_line(line: str):
+    """Parse a hexdump line → (prefix, byte_values, trailing) or None."""
+    m = _HEXDUMP_LINE_RE.match(line)
+    if not m:
+        return None
+    prefix = m.group(1)
+    hex_part = m.group(2)
+    trailing = m.group(3) or ""
+    byte_strs = re.findall(r'[0-9a-fA-F]{2}', hex_part)
+    if len(byte_strs) < 4:
+        return None
+    return prefix, bytes(int(b, 16) for b in byte_strs), trailing
+
+
+def _mark_ioc_byte_positions(
+    text: str,
+    mask: bytearray,
+    filters: Optional[Dict[str, bool]],
+    custom_rules: Optional[List[Dict[str, Any]]],
+) -> None:
+    """Set mask[i] = 1 for each byte position that falls within an IOC match."""
+    for category in _IOC_STRIP_ORDER:
+        if filters is not None and not filters.get(category, False):
+            continue
+        patterns = _IOC_CATEGORY_PATTERNS.get(category, [])
+        for pat in patterns:
+            for m in pat.finditer(text):
+                # Domain whitelist / file extension check
+                if category == "domains":
+                    low = m.group(0).lower()
+                    if low in _DOMAIN_WHITELIST:
+                        continue
+                    if low.endswith((".dll", ".exe", ".sys", ".bin", ".elf", ".so", ".dylib")):
+                        continue
+                for pos in range(m.start(), min(m.end(), len(mask))):
+                    mask[pos] = 1
+
+    if custom_rules:
+        for rule in custom_rules:
+            pattern = rule.get("pattern", "")
+            if not pattern:
+                continue
+            try:
+                pat = re.compile(pattern) if rule.get("is_regex") else re.compile(re.escape(pattern))
+                for m in pat.finditer(text):
+                    for pos in range(m.start(), min(m.end(), len(mask))):
+                        mask[pos] = 1
+            except re.error:
+                pass
+
+
+def _rebuild_hex_line(prefix: str, chunk: bytes) -> str:
+    """Rebuild a hexdump line from (possibly redacted) bytes."""
+    parts = [f'{b:02x}' for b in chunk]
+    if len(parts) > 8:
+        hex_str = ' '.join(parts[:8]) + '  ' + ' '.join(parts[8:])
+    else:
+        hex_str = ' '.join(parts)
+    ascii_col = ''.join(chr(b) if 0x20 <= b < 0x7f else '.' for b in chunk)
+    return f'{prefix}{hex_str}  |{ascii_col}|'
+
+
+def _sanitize_hexdump_iocs(
+    text: str,
+    filters: Optional[Dict[str, bool]] = None,
+    custom_rules: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """Pre-process hexdump blocks to redact IOC data in hex + ASCII columns.
+
+    An LLM can decode hex bytes to reconstruct IOC strings that text-based
+    regex would otherwise catch.  This function:
+
+    1. Detects contiguous hexdump-formatted lines.
+    2. Decodes all hex bytes to text (latin-1 for 1:1 byte mapping).
+    3. Finds IOC match positions using the same regex patterns as strip_iocs().
+    4. Zeros out matching byte positions in the hex column.
+    5. Rebuilds the hexdump with redacted content.
+    """
+    lines = text.split('\n')
+    output: List[str] = []
+    i = 0
+
+    while i < len(lines):
+        parsed = _parse_hexdump_line(lines[i])
+        if parsed is None:
+            output.append(lines[i])
+            i += 1
+            continue
+
+        # Collect contiguous hexdump block
+        block = [parsed]
+        j = i + 1
+        while j < len(lines):
+            p = _parse_hexdump_line(lines[j])
+            if p is None:
+                break
+            block.append(p)
+            j += 1
+
+        # Concatenate all bytes and decode
+        all_bytes = bytearray()
+        for _, bval, _ in block:
+            all_bytes.extend(bval)
+        decoded = all_bytes.decode('latin-1')
+
+        # Find IOC byte positions
+        mask = bytearray(len(all_bytes))
+        _mark_ioc_byte_positions(decoded, mask, filters, custom_rules)
+
+        if any(mask):
+            # Zero out marked bytes
+            for k in range(len(all_bytes)):
+                if mask[k]:
+                    all_bytes[k] = 0x00
+
+            # Rebuild lines with redacted bytes
+            offset = 0
+            for prefix, bval, _trailing in block:
+                n = len(bval)
+                output.append(_rebuild_hex_line(
+                    prefix, bytes(all_bytes[offset:offset + n]),
+                ))
+                offset += n
+        else:
+            # No IOCs found — keep original lines
+            output.extend(lines[i:j])
+
+        i = j
+
+    return '\n'.join(output)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

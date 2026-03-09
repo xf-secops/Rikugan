@@ -9,7 +9,7 @@ from typing import List, Optional
 from .qt_compat import (
     QApplication, QDialog, QDialogButtonBox, QVBoxLayout, QHBoxLayout, QFormLayout,
     QGroupBox, QComboBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox,
-    QLabel, QPushButton, QWidget, Qt, QTimer,
+    QLabel, QPushButton, QWidget, Qt, QTimer, QTabWidget,
 )
 from ..core.config import RikuganConfig
 from ..core.logging import log_debug, log_error
@@ -211,12 +211,32 @@ class SettingsDialog(QDialog):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+        self._tabs = QTabWidget()
+
+        # Tab 0: Provider (existing 3 group boxes)
+        provider_tab = QWidget()
+        playout = QVBoxLayout(provider_tab)
         self._provider_group = self._build_provider_group()
-        layout.addWidget(self._provider_group)
+        playout.addWidget(self._provider_group)
         self._generation_group = self._build_generation_group()
-        layout.addWidget(self._generation_group)
+        playout.addWidget(self._generation_group)
         self._behavior_group = self._build_behavior_group()
-        layout.addWidget(self._behavior_group)
+        playout.addWidget(self._behavior_group)
+        playout.addStretch()
+        self._tabs.addTab(provider_tab, "Provider")
+
+        # Tab 1-3: Skills, MCP, Profiles
+        from .tabs.skills_tab import SkillsTab
+        from .tabs.mcp_tab import MCPTab
+        from .tabs.profiles_tab import ProfilesTab
+        self._skills_tab = SkillsTab(self._config)
+        self._tabs.addTab(self._skills_tab, "Skills")
+        self._mcp_tab = MCPTab(self._config)
+        self._tabs.addTab(self._mcp_tab, "MCP")
+        self._profiles_tab = ProfilesTab(self._config)
+        self._tabs.addTab(self._profiles_tab, "Profiles")
+
+        layout.addWidget(self._tabs)
 
         self._button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -655,4 +675,10 @@ class SettingsDialog(QDialog):
         self._config.exploration_turn_limit = self._explore_turns_spin.value()
         self._config.max_retries = self._max_retries_spin.value()
         self._config.silent_retry_mode = self._silent_retry_cb.isChecked()
+
+        # Apply new tab settings
+        self._skills_tab.apply_to_config(self._config)
+        self._mcp_tab.apply_to_config(self._config)
+        self._profiles_tab.apply_to_config(self._config)
+
         self.accept()
