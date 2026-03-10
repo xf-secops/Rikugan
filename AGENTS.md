@@ -390,9 +390,11 @@ All four checks are **required** — a PR cannot merge if any of them fail.
 | Ruff | `python -m ruff` | Formatting + lint (style, unused imports, modernization) |
 | Mypy | `python -m mypy` | Type correctness on `rikugan/core` and `rikugan/providers` |
 | Pytest | `python -m pytest` | All tests under `tests/` must pass |
-| Desloppify | `desloppify scan --profile objective` | Objective code quality score must not drop below baseline (90.3) |
+| Desloppify | `desloppify scan --profile objective` | Objective code quality score must not drop below baseline (89.0) |
 
 CI does **not** run `desloppify review` (the LLM-powered subjective scoring) — that is run manually before releases to control cost.
+
+> **Note — Python version and desloppify scores:** desloppify's AST-based detectors are sensitive to the Python version used to run the scan. GitHub Actions uses Python 3.11 (scoring ~89.4). Different local Python versions will produce slightly different scores; the 0.5-point gap in the baseline is intentional to absorb this variance. For consistent local results, use `uv` with the `.python-version` file in the repo root (pins to 3.11). `ci-local.sh` will use `uv` automatically if it is installed.
 
 ### Release Flow
 

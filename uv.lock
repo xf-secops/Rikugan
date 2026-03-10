@@ -1,0 +1,29 @@
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[manifest]
+
+[manifest.dependency-groups]
+dev = [{ name = "desloppify", specifier = ">=0.9.3" }]
+
+[[package]]
+name = "defusedxml"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69", size = 75520, upload-time = "2021-03-08T10:59:26.269Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61", size = 25604, upload-time = "2021-03-08T10:59:24.45Z" },
+]
+
+[[package]]
+name = "desloppify"
+version = "0.9.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "defusedxml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/77/f1/8e8973d418605ede79fbe5c2ded74366bb0eba96282ec1f225df44a49895/desloppify-0.9.3.tar.gz", hash = "sha256:25f297c69d5ee11fa3a9a4e44611afd4155053210a631f900b26178f5d01ea1b", size = 894634, upload-time = "2026-03-09T23:20:21.806Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/50/52891cec197629df1fb0080b35e42b37dd380c71472489c1c461d4641a7e/desloppify-0.9.3-py3-none-any.whl", hash = "sha256:5d3add8aab1aa2024ddbd4267ebd31abcb1dc10eb5efbf7789f597dd8c7b4efc", size = 1285391, upload-time = "2026-03-09T23:20:19.76Z" },
+]

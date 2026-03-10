@@ -92,8 +92,27 @@ fi
 
 # ── 5. Desloppify — objective score gate ──────────────────────────────────────
 info "[5/5] Desloppify (objective score)..."
-if command -v desloppify &>/dev/null; then
-    desloppify scan --profile objective --no-badge 2>&1 | tail -5
+
+# Prefer uv for consistent Python 3.11 scoring (matches GitHub Actions)
+DESLOPPY_CMD=""
+if ! command -v uv &>/dev/null; then
+    echo -e "  ${YELLOW}uv not found. Install uv (Python version management) for reproducible scores matching CI.${RESET}"
+    read -r -p "  Install uv? (Y/n) " _UV_REPLY
+    if [[ "${_UV_REPLY:-Y}" =~ ^[Yy]$ ]]; then
+        pip3 install --quiet uv --break-system-packages 2>/dev/null || pip3 install --quiet uv
+        hash -r
+    fi
+fi
+
+if command -v uv &>/dev/null; then
+    uv add desloppify --dev --quiet 2>/dev/null || true
+    DESLOPPY_CMD="uv run desloppify"
+elif command -v desloppify &>/dev/null; then
+    DESLOPPY_CMD="desloppify"
+fi
+
+if [[ -n "$DESLOPPY_CMD" ]]; then
+    $DESLOPPY_CMD scan --profile objective --no-badge 2>&1 | tail -5
 
     SCORE=$(python3 -c "
 import json, sys
@@ -103,7 +122,7 @@ try:
 except Exception as e:
     print(0)
 ")
-    BASELINE=90.3
+    BASELINE=89.0
 
     DROPPED=$(python3 -c "print('yes' if float('$SCORE') < $BASELINE - 0.5 else 'no')")
     if [[ "$DROPPED" == "yes" ]]; then

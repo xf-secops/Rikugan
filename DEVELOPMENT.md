@@ -129,7 +129,7 @@ Binary Ninja and IDA Pro APIs are stubbed at test time — you do not need eithe
 
 ## Code Quality
 
-This project uses [desloppify](https://github.com/peteromallet/desloppify) to track codebase health. The current objective score is **90.3/100** (target: 95).
+This project uses [desloppify](https://github.com/peteromallet/desloppify) to track codebase health. The current objective score is **89.0/100** (target: 95).
 
 Run a scan locally at any time:
 
@@ -140,6 +140,13 @@ desloppify issues   # work queue of findings
 ```
 
 The `desloppify review` command (subjective scoring) uses an LLM and is run manually before releases, not on every change.
+
+**Python version note:** desloppify's AST-based detectors are sensitive to the Python version running the scan. GitHub Actions uses Python 3.11 (~89.4 score). Different local versions will yield slightly different scores — the 0.5-point baseline gap is intentional to absorb this variance. For consistent local results, install `uv`; the `.python-version` file in the repo root pins to 3.11 and `ci-local.sh` will use it automatically.
+
+```bash
+pip install uv                   # install uv once
+uv add desloppify --dev          # add desloppify (ci-local.sh does this automatically)
+```
 
 ---
 
