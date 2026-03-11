@@ -19,6 +19,7 @@ from .qt_compat import (
     Qt,
     QTableWidget,
     QTableWidgetItem,
+    QTimer,
     QVBoxLayout,
     QWidget,
     Signal,
@@ -329,13 +330,22 @@ class BulkRenamerWidget(QWidget):
         self._table.itemChanged.connect(self._on_item_changed)
         self._update_selection_count()
 
+    # Rows to insert per timer tick during chunked loading.
+    _LOAD_CHUNK_SIZE = 200
+
     def load_functions(self, functions: list[dict]) -> None:
         """Populate the table from a list of function dicts.
 
         Each dict: {"address": int, "name": str, "is_import": bool, "instruction_count": int}
+
+        For large lists the rows are inserted in chunks via a QTimer so the UI
+        thread stays responsive (prevents the "blank panel" freeze).
         """
+        # Cancel any in-flight chunked load
+        self._cancel_chunked_load()
+
         self._loading = True
-        self._table.setSortingEnabled(False)  # disable during bulk insert
+        self._table.setSortingEnabled(False)
         self._table.itemChanged.disconnect(self._on_item_changed)
         self._table.setRowCount(0)
         self._entries.clear()
@@ -343,7 +353,46 @@ class BulkRenamerWidget(QWidget):
 
         self._table.setRowCount(len(functions))
 
-        for row, func in enumerate(functions):
+        if len(functions) <= self._LOAD_CHUNK_SIZE:
+            # Small list — populate synchronously for snappy feel
+            self._populate_rows(functions, 0, len(functions))
+            self._finish_load()
+        else:
+            # Large list — process in chunks to keep UI alive
+            self._pending_functions = functions
+            self._load_cursor = 0
+            self._load_timer = QTimer(self)
+            self._load_timer.setInterval(0)  # process next chunk ASAP
+            self._load_timer.timeout.connect(self._load_next_chunk)
+            self._load_timer.start()
+
+    def _load_next_chunk(self) -> None:
+        """Insert the next chunk of rows."""
+        funcs = self._pending_functions
+        start = self._load_cursor
+        end = min(start + self._LOAD_CHUNK_SIZE, len(funcs))
+
+        self._populate_rows(funcs, start, end)
+        self._load_cursor = end
+
+        if end >= len(funcs):
+            self._finish_load()
+            self._cancel_chunked_load()
+
+    def _cancel_chunked_load(self) -> None:
+        """Stop and clean up any in-flight chunked load timer."""
+        timer = getattr(self, "_load_timer", None)
+        if timer is not None:
+            timer.stop()
+            timer.deleteLater()
+            self._load_timer = None
+        self._pending_functions = []
+        self._load_cursor = 0
+
+    def _populate_rows(self, functions: list[dict], start: int, end: int) -> None:
+        """Insert rows [start, end) into the table."""
+        for row in range(start, end):
+            func = functions[row]
             entry = FunctionEntry(
                 address=func["address"],
                 name=func["name"],
@@ -392,6 +441,8 @@ class BulkRenamerWidget(QWidget):
             status_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             self._table.setItem(row, _COL_STATUS, status_item)
 
+    def _finish_load(self) -> None:
+        """Re-enable table features after load completes."""
         self._table.itemChanged.connect(self._on_item_changed)
         self._table.setSortingEnabled(True)
         self._loading = False

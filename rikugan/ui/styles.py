@@ -21,7 +21,7 @@ QFrame#message_user {
     background-color: #2d2d2d;
     border-radius: 8px;
     padding: 8px;
-    margin: 4px 40px 4px 8px;
+    margin: 4px 8px 4px 8px;
 }
 
 QFrame#message_assistant {

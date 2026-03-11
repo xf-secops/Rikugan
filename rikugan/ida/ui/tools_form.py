@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-from rikugan.ui.qt_compat import QVBoxLayout, QWidget
+from rikugan.ui.qt_compat import QTimer, QVBoxLayout, QWidget
 from rikugan.ui.tools_panel import ToolsPanel
 
 idaapi = importlib.import_module("idaapi")
@@ -56,6 +56,19 @@ class RikuganToolsForm(idaapi.PluginForm):
             placeholder = QLabel("Tools panel is reloading...")
             placeholder.setStyleSheet("color: #808080; padding: 20px;")
             layout.addWidget(placeholder)
+
+        # IDA's docking system doesn't always trigger a paint after the
+        # initial Show().  Schedule a deferred update so the form contents
+        # become visible without requiring the user to switch away and back.
+        QTimer.singleShot(50, self._force_update)
+
+    def _force_update(self) -> None:
+        """Force the form and tools widget to repaint after IDA docking."""
+        if self._form_widget is not None:
+            self._form_widget.update()
+        if _widget_alive(self._tools_widget):
+            self._tools_widget.update()
+            self._tools_widget.updateGeometry()
 
     def OnClose(self, form: Any) -> None:
         # Reparent the tools widget out of the doomed form so it is not

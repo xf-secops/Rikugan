@@ -12,6 +12,7 @@ from .qt_compat import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     Qt,
     QTimer,
     QToolButton,
@@ -118,6 +119,10 @@ class UserMessageWidget(QFrame):
             Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
         self._content.setStyleSheet("color: #d4d4d4; font-size: 13px;")
+        self._content.setMinimumWidth(0)
+        self._content.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         layout.addWidget(self._content)
 
 
@@ -223,7 +228,8 @@ class _ThinkingBlock(QFrame):
 class AssistantMessageWidget(QFrame):
     """Displays an assistant message with streaming support and Markdown rendering."""
 
-    _RENDER_BATCH = 40
+    # Larger batch = fewer re-layouts during streaming = less shaking.
+    _RENDER_BATCH = 120
 
     def __init__(self, parent: QWidget = None):
         super().__init__(parent)
@@ -251,6 +257,11 @@ class AssistantMessageWidget(QFrame):
         )
         self._content.setOpenExternalLinks(True)
         self._content.setStyleSheet("color: #d4d4d4; font-size: 13px;")
+        # Prevent the label from requesting more width than its parent
+        self._content.setMinimumWidth(0)
+        self._content.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         layout.addWidget(self._content)
 
     def _render(self) -> None:
@@ -574,4 +585,8 @@ class ErrorMessageWidget(QFrame):
             Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
         self._content.setStyleSheet("color: #f44747; font-size: 12px;")
+        self._content.setMinimumWidth(0)
+        self._content.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         layout.addWidget(self._content)

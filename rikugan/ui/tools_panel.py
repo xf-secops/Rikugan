@@ -59,8 +59,8 @@ class ToolsPanel(QWidget):
         self.setObjectName("tools_panel")
         self.setWindowTitle("Rikugan Tools")
         self.setStyleSheet(_PANEL_STYLE)
-        self.setMinimumSize(600, 400)
-        self.resize(800, 600)
+        # No minimum size — this widget is embedded in IDA dockable forms
+        # and Binary Ninja sidebars, which can be any size.
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)

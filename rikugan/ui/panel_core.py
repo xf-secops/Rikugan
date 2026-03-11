@@ -343,7 +343,15 @@ class RikuganPanelCore(QWidget):
         # --- Page 1: Tools (lazily populated on first switch) ---
         self._tools_panel = ToolsPanel()
         self._tools_panel.hide_header()
-        self._mode_stack.addWidget(self._tools_panel)
+        if self._tools_form_factory is not None:
+            # IDA: ToolsPanel will live in a separate dockable form, not
+            # in the mode_stack.  Add a lightweight placeholder so the
+            # stack still has a page 1.
+            _tools_placeholder = QWidget()
+            self._mode_stack.addWidget(_tools_placeholder)
+        else:
+            # Binary Ninja: embed directly in the mode stack.
+            self._mode_stack.addWidget(self._tools_panel)
         self._tools_tab_index = -1  # kept for IDA compat
 
         self._context_bar = ContextBar()
@@ -1142,8 +1150,9 @@ class RikuganPanelCore(QWidget):
         # Discover external agents in background
         self._discover_external_agents()
 
-        # Populate bulk renamer with functions from the binary
-        self._load_renamer_functions()
+        # Populate bulk renamer with functions from the binary.
+        # Defer to next event-loop tick so the panel paints first.
+        QTimer.singleShot(0, self._load_renamer_functions)
 
         # Start tools polling timer
         self._tools_poll_timer = QTimer(self)
@@ -1212,9 +1221,8 @@ class RikuganPanelCore(QWidget):
     def _load_renamer_functions(self) -> None:
         """Populate the bulk renamer widget with functions from the binary.
 
-        Calls the list_functions tool handler directly on the main thread
-        (bypasses TPE + idasync to avoid deadlocking) and parses the text
-        output into structured dicts for the widget.
+        Fetches pages of functions one at a time via QTimer so the UI thread
+        stays responsive between pages (avoids blocking on large binaries).
         """
         if not hasattr(self, "_bulk_renamer"):
             return
@@ -1225,26 +1233,35 @@ class RikuganPanelCore(QWidget):
             log_info("list_functions tool not available — renamer table will be empty")
             return
 
-        def _fetch_page(offset: int, limit: int) -> str | None:
-            """Call the handler directly (already on main thread)."""
-            try:
-                return defn.handler(offset=offset, limit=limit)
-            except Exception as e:
-                log_error(f"list_functions failed at offset {offset}: {e}")
-                return None
+        # State for the incremental page fetcher
+        self._renamer_load_funcs: list[dict] = []
+        self._renamer_load_offset = 0
+        self._renamer_load_batch = 500
+        self._renamer_load_defn = defn
 
-        functions: list[dict] = []
-        offset = 0
-        batch = 500
-        while True:
-            raw = _fetch_page(offset, batch)
-            if not raw:
-                break
-            page_count = 0
+        self._renamer_fetch_timer = QTimer(self)
+        self._renamer_fetch_timer.setInterval(0)
+        self._renamer_fetch_timer.timeout.connect(self._fetch_renamer_page)
+        self._renamer_fetch_timer.start()
+
+    def _fetch_renamer_page(self) -> None:
+        """Fetch one page of functions and schedule the next or finish."""
+        defn = self._renamer_load_defn
+        offset = self._renamer_load_offset
+        batch = self._renamer_load_batch
+
+        try:
+            raw = defn.handler(offset=offset, limit=batch)
+        except Exception as e:
+            log_error(f"list_functions failed at offset {offset}: {e}")
+            raw = None
+
+        page_count = 0
+        if raw:
             for line in raw.splitlines():
                 m = re.match(r"\s*0x([0-9a-fA-F]+)\s+(.+)", line)
                 if m:
-                    functions.append(
+                    self._renamer_load_funcs.append(
                         {
                             "address": int(m.group(1), 16),
                             "name": m.group(2).strip(),
@@ -1253,9 +1270,18 @@ class RikuganPanelCore(QWidget):
                         }
                     )
                     page_count += 1
-            if page_count < batch:
-                break
-            offset += batch
+
+        if page_count >= batch:
+            # More pages to fetch
+            self._renamer_load_offset += batch
+            return
+
+        # All pages fetched — stop timer and load into widget
+        self._renamer_fetch_timer.stop()
+        self._renamer_fetch_timer.deleteLater()
+        self._renamer_fetch_timer = None
+
+        functions = self._renamer_load_funcs
 
         # Approximate function size from consecutive addresses
         for i in range(len(functions) - 1):
@@ -1266,6 +1292,10 @@ class RikuganPanelCore(QWidget):
             log_info(f"Loaded {len(functions)} functions into bulk renamer")
         else:
             log_info("No functions found for bulk renamer")
+
+        # Clean up temporary state
+        self._renamer_load_funcs = []
+        self._renamer_load_defn = None
 
     # --- Tools panel event handlers ---
 
