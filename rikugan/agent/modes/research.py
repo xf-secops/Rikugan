@@ -408,6 +408,15 @@ def run_research_mode(
     research_state.knowledge_base = explore_state.knowledge_base
     research_state.knowledge_base.user_goal = user_message
 
+    # Guard: only proceed to note-writing if exploration produced findings
+    kb = research_state.knowledge_base
+    has_findings = bool(kb.findings or kb.relevant_functions or kb.hypotheses)
+    if not has_findings:
+        log_info("Research mode: no findings from exploration, skipping note-writing")
+        loop._research_state = None
+        loop._clear_exploration_state()
+        return
+
     # Phase 2: WRITE NOTES — agent writes research_note calls
     log_info("Research mode: entering note-writing phase")
     yield TurnEvent.exploration_phase_change("explore", "document", "Exploration complete. Writing research notes...")
