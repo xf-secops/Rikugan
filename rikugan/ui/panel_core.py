@@ -341,7 +341,7 @@ class RikuganPanelCore(QWidget):
         self._mode_stack.addWidget(chat_page)
 
         # --- Page 1: Tools (lazily populated on first switch) ---
-        self._tools_panel = ToolsPanel()
+        self._tools_panel: ToolsPanel | None = ToolsPanel()
         self._tools_panel.hide_header()
         if self._tools_form_factory is not None:
             # IDA: ToolsPanel will live in a separate dockable form, not
@@ -1121,6 +1121,8 @@ class RikuganPanelCore(QWidget):
     def _ensure_tools_initialized(self) -> None:
         """Lazily initialize tools panel contents on first open."""
         if getattr(self, "_tools_initialized", False):
+            return
+        if self._tools_panel is None:
             return
         self._tools_initialized = True
 
