@@ -413,6 +413,10 @@ def run_research_mode(
     # ------------------------------------------------------------------
     # Phase 1: EXPLORE
     # ------------------------------------------------------------------
+    # Exploration gets all tools EXCEPT research_note — prevents the LLM
+    # from writing notes during exploration (that's the document phase's job).
+    explore_tools = [t for t in tools_schema if t.get("function", {}).get("name") != "research_note"]
+
     if tracker.should_run("explore"):
         tracker.enter("explore")
         if not tracker.is_continuing("explore"):
@@ -420,7 +424,7 @@ def run_research_mode(
 
         from .exploration import _run_phase1_inline
 
-        yield from _run_phase1_inline(loop, explore_state, research_system, tools_schema, explore_only=True)
+        yield from _run_phase1_inline(loop, explore_state, research_system, explore_tools, explore_only=True)
 
         # Merge exploration KB into research state
         research_state.knowledge_base = explore_state.knowledge_base
