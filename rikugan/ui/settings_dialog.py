@@ -432,8 +432,7 @@ class SettingsDialog(QDialog):
         self._encrypt_keys_cb.setChecked(self._config.encrypt_api_keys)
         self._encrypt_keys_cb.setEnabled(crypto_available())
         self._encrypt_keys_cb.setToolTip(
-            "Encrypt all stored API keys with a password.\n"
-            "You must enter this password each time Rikugan starts."
+            "Encrypt all stored API keys with a password.\nYou must enter this password each time Rikugan starts."
             if crypto_available()
             else "Requires the 'cryptography' package (pip install cryptography)."
         )

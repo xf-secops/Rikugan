@@ -145,10 +145,7 @@ class RikuganConfig:
             # Collect all API keys into a single blob
             key_data = {
                 "provider_api_key": d["provider"]["api_key"],
-                "providers": {
-                    name: info.get("api_key", "")
-                    for name, info in d.get("providers", {}).items()
-                },
+                "providers": {name: info.get("api_key", "") for name, info in d.get("providers", {}).items()},
             }
             d["encryption"] = {"enabled": True, **encrypt_keys(password, key_data)}
             # Zero out plaintext keys on disk

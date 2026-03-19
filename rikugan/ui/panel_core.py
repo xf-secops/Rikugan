@@ -270,7 +270,7 @@ class RikuganPanelCore(QWidget):
         """Prompt for the encryption password at session start."""
         from .qt_compat import QDialog, QDialogButtonBox, QLabel, QLineEdit, QMessageBox, QVBoxLayout
 
-        for attempt in range(3):
+        for _attempt in range(3):
             dlg = QDialog()
             dlg.setWindowTitle("Rikugan — Encrypted API Keys")
             dlg.setMinimumWidth(350)

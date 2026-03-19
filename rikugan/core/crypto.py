@@ -77,8 +77,8 @@ def decrypt_keys(password: str, enc_block: dict) -> dict:
     key = _derive_key(password, salt)
     try:
         plaintext = AESGCM(key).decrypt(nonce, ct, None)
-    except InvalidTag:
-        raise ValueError("Wrong password or corrupted data")
+    except InvalidTag as exc:
+        raise ValueError("Wrong password or corrupted data") from exc
 
     payload = json.loads(plaintext)
     if payload.get("verify") != _VERIFY_SENTINEL:
