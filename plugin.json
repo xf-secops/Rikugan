@@ -34,6 +34,6 @@
     "Windows": "Clone/symlink this repository into %APPDATA%/Binary Ninja/plugins/rikugan"
   },
   "projectUrl": "https://github.com/buzzer-re/rikugan",
-  "version": "1.1",
+  "version": "1.2",
   "minimumbinaryninjaversion": 3164
 }
