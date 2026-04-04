@@ -10,6 +10,7 @@
 # Environment variables:
 #   RIKUGAN_DIR     — where to clone the repo   (default: ~/.rikugan)
 #   RIKUGAN_BRANCH  — git branch to check out   (default: main)
+#   IDADIR          — override IDA install dir  (forwarded to install_ida.sh)
 #   IDA_PYTHON      — override Python for IDA    (forwarded to install_ida.sh)
 #   BN_PYTHON       — override Python for BN     (forwarded to install_binaryninja.sh)
 # ──────────────────────────────────────────────────────────────────────

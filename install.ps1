@@ -11,6 +11,7 @@
 # Environment variables:
 #   RIKUGAN_DIR     — where to clone the repo   (default: ~\.rikugan)
 #   RIKUGAN_BRANCH  — git branch to check out   (default: main)
+#   IDADIR          — override IDA install dir  (forwarded to install_ida.bat)
 #   IDA_PYTHON      — override Python for IDA    (forwarded to install_ida.bat)
 #   BN_PYTHON       — override Python for BN     (forwarded to install_binaryninja.bat)
 # ──────────────────────────────────────────────────────────────────────
@@ -80,6 +81,266 @@ function Test-BinaryNinja {
     return $false
 }
 
+function Find-ByteSequenceIndex {
+    param(
+        [byte[]]$Data,
+        [byte[]]$Needle
+    )
+
+    if (-not $Data -or -not $Needle -or $Needle.Length -eq 0 -or $Needle.Length -gt $Data.Length) {
+        return -1
+    }
+
+    for ($i = 0; $i -le ($Data.Length - $Needle.Length); $i++) {
+        $matched = $true
+        for ($j = 0; $j -lt $Needle.Length; $j++) {
+            if ($Data[$i + $j] -ne $Needle[$j]) {
+                $matched = $false
+                break
+            }
+        }
+        if ($matched) {
+            return $i
+        }
+    }
+
+    return -1
+}
+
+function Get-IdaUserDir {
+    $candidates = @()
+
+    if ($env:APPDATA) {
+        $candidates += (Join-Path $env:APPDATA "Hex-Rays\IDA Pro")
+    }
+    if ($HOME) {
+        $candidates += (Join-Path $HOME ".idapro")
+    }
+    if ($env:IDAUSR) {
+        $candidates += $env:IDAUSR
+    }
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) {
+            return $candidate
+        }
+    }
+
+    if ($env:APPDATA) {
+        return (Join-Path $env:APPDATA "Hex-Rays\IDA Pro")
+    }
+
+    return $null
+}
+
+function Get-IdaInstallDir {
+    if ($env:IDADIR -and (Test-Path $env:IDADIR)) {
+        return $env:IDADIR
+    }
+
+    $regPaths = @(
+        "HKCU:\Software\Hex-Rays\IDA",
+        "HKLM:\SOFTWARE\Hex-Rays\IDA",
+        "HKLM:\SOFTWARE\WOW6432Node\Hex-Rays\IDA"
+    )
+    foreach ($rp in $regPaths) {
+        try {
+            $location = (Get-ItemProperty -Path $rp -ErrorAction Stop).Location
+            if ($location -and (Test-Path $location)) {
+                return $location
+            }
+        }
+        catch {
+        }
+    }
+
+    foreach ($name in @("ida64.exe", "idat64.exe", "ida.exe", "idat.exe")) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($command -and $command.Source) {
+            return (Split-Path -Parent $command.Source)
+        }
+    }
+
+    $installPaths = @(
+        "${env:ProgramFiles}\Hex-Rays\IDA Pro",
+        "${env:ProgramFiles}\Hex-Rays\IDA Professional",
+        "${env:ProgramFiles}\IDA Pro",
+        "${env:ProgramFiles(x86)}\Hex-Rays\IDA Pro",
+        "${env:ProgramFiles(x86)}\Hex-Rays\IDA Professional",
+        "${env:ProgramFiles(x86)}\IDA Pro"
+    )
+    foreach ($path in $installPaths) {
+        if ($path -and (Test-Path $path)) {
+            return $path
+        }
+    }
+
+    return $null
+}
+
+function Get-IdaRegPythonTarget {
+    param([string]$UserDir)
+
+    if (-not $UserDir) {
+        return $null
+    }
+
+    $regFile = Join-Path $UserDir "ida.reg"
+    if (-not (Test-Path $regFile -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        $data = [System.IO.File]::ReadAllBytes($regFile)
+    }
+    catch {
+        return $null
+    }
+
+    $needle = [System.Text.Encoding]::ASCII.GetBytes("Python3TargetDLL")
+    $idx = Find-ByteSequenceIndex -Data $data -Needle $needle
+    if ($idx -lt 0) {
+        return $null
+    }
+
+    $keyEnd = $idx
+    while ($keyEnd -lt $data.Length -and $data[$keyEnd] -ne 0) {
+        $keyEnd++
+    }
+
+    if (($keyEnd + 6) -gt $data.Length) {
+        return $null
+    }
+
+    $length = [System.BitConverter]::ToInt32($data, $keyEnd + 1)
+    if ($length -le 0 -or $length -gt 4096) {
+        return $null
+    }
+
+    $valueStart = $keyEnd + 6
+    if (($valueStart + $length) -gt $data.Length) {
+        return $null
+    }
+
+    [byte[]]$valueBytes = $data[$valueStart..($valueStart + $length - 1)]
+    $path = [System.Text.Encoding]::UTF8.GetString($valueBytes).Trim([char]0, ' ')
+    if ($path -match '^(?:[A-Za-z]:\\|\\\\)') {
+        return $path
+    }
+
+    return $null
+}
+
+function Resolve-IdaPythonExecutable {
+    param([string]$TargetPath)
+
+    if (-not $TargetPath) {
+        return $null
+    }
+
+    $target = $TargetPath.Trim().Trim('"').Trim("'")
+    if (-not $target) {
+        return $null
+    }
+
+    if (Test-Path $target -PathType Leaf) {
+        $leaf = [System.IO.Path]::GetFileName($target)
+        if ($leaf -match '^python(?:3|[0-9]+)?\.exe$') {
+            return $target
+        }
+    }
+
+    $candidates = [System.Collections.Generic.List[string]]::new()
+
+    if (Test-Path $target -PathType Container) {
+        $candidates.Add((Join-Path $target "python.exe"))
+        $candidates.Add((Join-Path $target "python3.exe"))
+    }
+    else {
+        $parent = Split-Path -Parent $target
+        $leaf = [System.IO.Path]::GetFileName($target)
+
+        if ($leaf -match '^python([0-9]+)?\.dll$') {
+            $digits = $Matches[1]
+            if ($digits) {
+                $candidates.Add((Join-Path $parent "python$digits.exe"))
+            }
+            $candidates.Add((Join-Path $parent "python.exe"))
+            $candidates.Add((Join-Path $parent "python3.exe"))
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate -PathType Leaf)) {
+            return $candidate
+        }
+    }
+
+    if ($leaf -match '^python([0-9]+)\.dll$') {
+        $digits = $Matches[1]
+        if ($digits.Length -ge 2) {
+            $versionName = "python$($digits.Substring(0, 1)).$($digits.Substring(1))"
+            $command = Get-Command $versionName -ErrorAction SilentlyContinue
+            if ($command -and $command.Source) {
+                return $command.Source
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-IdaPython {
+    $userDir = Get-IdaUserDir
+    $pythonTarget = Get-IdaRegPythonTarget -UserDir $userDir
+    $resolved = Resolve-IdaPythonExecutable -TargetPath $pythonTarget
+    if ($resolved) {
+        return $resolved
+    }
+
+    $installDir = Get-IdaInstallDir
+    if (-not $installDir) {
+        return $null
+    }
+
+    $bundledDirs = Get-ChildItem -Path (Join-Path $installDir "python3*") -Directory -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending
+    foreach ($dir in $bundledDirs) {
+        foreach ($name in @("python.exe", "python3.exe")) {
+            $candidate = Join-Path $dir.FullName $name
+            if (Test-Path $candidate -PathType Leaf) {
+                return $candidate
+            }
+        }
+    }
+
+    foreach ($candidate in @(
+        (Join-Path $installDir "python\python.exe"),
+        (Join-Path $installDir "python\python3.exe")
+    )) {
+        if (Test-Path $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+
+    $idapyswitch = Join-Path $installDir "idapyswitch.exe"
+    if (Test-Path $idapyswitch -PathType Leaf) {
+        $lines = & $idapyswitch --show-current 2>$null
+        foreach ($line in $lines) {
+            $target = $line.Trim().Trim("'")
+            if ($target -like "Path:*") {
+                $target = $target.Substring(5).Trim()
+            }
+            $resolved = Resolve-IdaPythonExecutable -TargetPath $target
+            if ($resolved) {
+                return $resolved
+            }
+        }
+    }
+
+    return $null
+}
+
 # ── Prerequisites ────────────────────────────────────────────────────
 function Test-Prerequisites {
     if (-not (Get-Command "git" -ErrorAction SilentlyContinue)) {
@@ -121,12 +382,29 @@ function Install-IDA {
     }
     Write-Info "Running IDA Pro installer..."
     Write-Host ""
+    $setIdaPython = $false
+    if (-not $env:IDA_PYTHON) {
+        $resolvedIdaPython = Get-IdaPython
+        if ($resolvedIdaPython) {
+            Write-Info "Resolved IDA Python: $resolvedIdaPython"
+            $env:IDA_PYTHON = $resolvedIdaPython
+            $setIdaPython = $true
+        }
+        else {
+            Write-Warn "Could not resolve IDA's configured Python, falling back to installer-side detection."
+        }
+    }
     Push-Location $InstallDir
     try {
         & cmd.exe /c $script
         $success = $LASTEXITCODE -eq 0
     }
-    finally { Pop-Location }
+    finally {
+        Pop-Location
+        if ($setIdaPython) {
+            Remove-Item Env:IDA_PYTHON -ErrorAction SilentlyContinue
+        }
+    }
     return $success
 }
 

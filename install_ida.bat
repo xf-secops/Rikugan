@@ -77,15 +77,20 @@ if exist "%OLD_IRIS%\" (
 :: ── Find IDA installation directory ──────────────────────────────────
 
 set "IDA_INSTALL_DIR="
-for /f "tokens=2*" %%A in ('reg query "HKCU\Software\Hex-Rays\IDA" /v "Location" 2^>nul') do set "IDA_INSTALL_DIR=%%B"
+if defined IDADIR if exist "%IDADIR%\" set "IDA_INSTALL_DIR=%IDADIR%"
+if not defined IDA_INSTALL_DIR (
+    for /f "tokens=2*" %%A in ('reg query "HKCU\Software\Hex-Rays\IDA" /v "Location" 2^>nul') do set "IDA_INSTALL_DIR=%%B"
+)
 if not defined IDA_INSTALL_DIR (
     for /f "tokens=2*" %%A in ('reg query "HKLM\SOFTWARE\Hex-Rays\IDA" /v "Location" 2^>nul') do set "IDA_INSTALL_DIR=%%B"
+)
+if not defined IDA_INSTALL_DIR (
+    for /f "tokens=2*" %%A in ('reg query "HKLM\SOFTWARE\WOW6432Node\Hex-Rays\IDA" /v "Location" 2^>nul') do set "IDA_INSTALL_DIR=%%B"
 )
 
 :: ── Find IDA's Python ─────────────────────────────────────────────────
 
-set "IDA_PYTHON="
-if defined IDA_INSTALL_DIR (
+if not defined IDA_PYTHON if defined IDA_INSTALL_DIR (
     echo [*] IDA install dir: !IDA_INSTALL_DIR!
     :: Bundled Python: <IDA>\python3.XX\python.exe  (IDA 7.5+)
     for /d %%D in ("!IDA_INSTALL_DIR!\python3*") do (
@@ -104,7 +109,9 @@ if defined IDA_INSTALL_DIR (
                 :: Output is typically a bare path or "Path: C:\..."
                 set "_line=%%L"
                 set "_line=!_line:Path: =!"
-                if exist "!_line!" set "IDA_PYTHON=!_line!"
+                set "_line=!_line:'=!"
+                call :resolve_python_target "!_line!"
+                if defined RESOLVED_PYTHON set "IDA_PYTHON=!RESOLVED_PYTHON!"
             )
         )
     )
@@ -229,6 +236,56 @@ echo [*] For Binary Ninja installation, run install_binaryninja.bat
 
 endlocal
 exit /b 0
+
+:resolve_python_target
+set "RESOLVED_PYTHON="
+set "TARGET=%~1"
+if not defined TARGET exit /b 1
+
+for %%I in ("%TARGET%") do (
+    set "TARGET_PATH=%%~fI"
+    set "TARGET_DIR=%%~dpI"
+    set "TARGET_NAME=%%~nxI"
+    set "TARGET_BASE=%%~nI"
+)
+
+if exist "!TARGET_PATH!" (
+    if /i "!TARGET_NAME:~-4!"==".exe" (
+        set "RESOLVED_PYTHON=!TARGET_PATH!"
+        exit /b 0
+    )
+)
+
+if exist "!TARGET_PATH!\" (
+    if exist "!TARGET_PATH!\python.exe" (
+        set "RESOLVED_PYTHON=!TARGET_PATH!\python.exe"
+        exit /b 0
+    )
+    if exist "!TARGET_PATH!\python3.exe" (
+        set "RESOLVED_PYTHON=!TARGET_PATH!\python3.exe"
+        exit /b 0
+    )
+)
+
+if /i "!TARGET_NAME:~-4!"==".dll" (
+    if exist "!TARGET_DIR!python.exe" (
+        set "RESOLVED_PYTHON=!TARGET_DIR!python.exe"
+        exit /b 0
+    )
+    if exist "!TARGET_DIR!python3.exe" (
+        set "RESOLVED_PYTHON=!TARGET_DIR!python3.exe"
+        exit /b 0
+    )
+    set "DLL_VER=!TARGET_BASE:python=!"
+    if not "!DLL_VER!"=="!TARGET_BASE!" (
+        if exist "!TARGET_DIR!python!DLL_VER!.exe" (
+            set "RESOLVED_PYTHON=!TARGET_DIR!python!DLL_VER!.exe"
+            exit /b 0
+        )
+    )
+)
+
+exit /b 1
 
 :try_install_requirements
 %PIP_CMD% --version >nul 2>&1

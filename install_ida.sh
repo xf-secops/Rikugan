@@ -94,21 +94,53 @@ fi
 
 # ── Find IDA installation directory ───────────────────────────────────
 
+_normalize_ida_install_dir() {
+    local path="$1"
+    [[ -n "$path" ]] || return 1
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if [[ -d "$path/Contents/MacOS" ]]; then
+            echo "$path/Contents/MacOS"
+            return 0
+        fi
+    fi
+
+    [[ -d "$path" ]] || return 1
+    echo "$path"
+}
+
 find_ida_install_dir() {
     # Check IDADIR env var first
-    if [[ -n "${IDADIR:-}" ]] && [[ -d "$IDADIR" ]]; then
-        echo "$IDADIR"
-        return 0
+    if [[ -n "${IDADIR:-}" ]]; then
+        local normalized
+        if normalized="$(_normalize_ida_install_dir "$IDADIR")"; then
+            echo "$normalized"
+            return 0
+        fi
     fi
+
+    # PATH is a stronger signal than arbitrary filesystem scanning.
+    local ida_bin
+    for name in ida64 idat64 ida idat; do
+        if ida_bin="$(command -v "$name" 2>/dev/null)"; then
+            local real_bin
+            real_bin="$(readlink -f "$ida_bin" 2>/dev/null || realpath "$ida_bin" 2>/dev/null || echo "$ida_bin")"
+            local normalized
+            if normalized="$(_normalize_ida_install_dir "$(dirname "$real_bin")")"; then
+                echo "$normalized"
+                return 0
+            fi
+        fi
+    done
 
     local candidates=()
     if [[ "$(uname)" == "Darwin" ]]; then
         # macOS: IDA .app bundles — the actual binaries are in Contents/MacOS
         for app in /Applications/IDA*.app; do
-            [[ -d "$app/Contents/MacOS" ]] && candidates+=("$app/Contents/MacOS")
+            [[ -d "$app" ]] && candidates+=("$app")
         done
         for app in "$HOME/Applications/IDA"*.app; do
-            [[ -d "$app/Contents/MacOS" ]] && candidates+=("$app/Contents/MacOS")
+            [[ -d "$app" ]] && candidates+=("$app")
         done
     else
         # Linux common install locations
@@ -120,21 +152,11 @@ find_ida_install_dir() {
         )
     fi
 
+    local dir
     for dir in "${candidates[@]}"; do
-        if [[ -d "$dir" ]]; then
-            echo "$dir"
-            return 0
-        fi
-    done
-
-    # Try finding via PATH (ida64 or idat64)
-    local ida_bin
-    for name in ida64 idat64 ida idat; do
-        if ida_bin="$(command -v "$name" 2>/dev/null)"; then
-            # Resolve symlinks and get directory
-            local real_bin
-            real_bin="$(readlink -f "$ida_bin" 2>/dev/null || realpath "$ida_bin" 2>/dev/null || echo "$ida_bin")"
-            echo "$(dirname "$real_bin")"
+        local normalized
+        if normalized="$(_normalize_ida_install_dir "$dir" 2>/dev/null)"; then
+            echo "$normalized"
             return 0
         fi
     done
@@ -144,24 +166,83 @@ find_ida_install_dir() {
 
 # ── Find IDA's Python ────────────────────────────────────────────────
 
-_dylib_to_interpreter() {
-    # Given a libpython dylib/so path, find the python3 interpreter.
-    # e.g. .../Python.framework/Versions/3.14/Python → .../Versions/3.14/bin/python3
-    # e.g. /usr/lib/libpython3.12.so → /usr/bin/python3.12 or /usr/bin/python3
-    local dylib="$1"
-    local dylib_dir
-    dylib_dir="$(dirname "$dylib")"
-
-    # Framework layout (macOS): <framework>/Versions/X.Y/bin/python3
-    for pybin in "$dylib_dir/bin/python3" "$dylib_dir/bin/python"; do
-        if [[ -x "$pybin" ]]; then
-            echo "$pybin"
+_find_host_python() {
+    local py
+    for py in python3 python; do
+        if command -v "$py" >/dev/null 2>&1; then
+            command -v "$py"
             return 0
         fi
     done
+    return 1
+}
 
-    # Shared lib layout (Linux): libpython is in lib/, interpreter in ../bin/
-    for pybin in "$dylib_dir/../bin/python3" "$dylib_dir/python3" "$dylib_dir/../bin/python"; do
+_extract_python_version() {
+    local target="$1"
+    local version
+
+    version="$(printf '%s\n' "$target" | sed -nE 's@.*/Versions/([0-9]+\.[0-9]+)/.*@\1@p' | head -n 1)"
+    if [[ -n "$version" ]]; then
+        echo "$version"
+        return 0
+    fi
+
+    version="$(basename "$target" | sed -nE 's/^libpython([0-9]+\.[0-9]+).*/\1/p' | head -n 1)"
+    if [[ -n "$version" ]]; then
+        echo "$version"
+        return 0
+    fi
+
+    return 1
+}
+
+_python_target_to_interpreter() {
+    # Given the configured Python shared library path, find the matching interpreter.
+    local target="$1"
+    [[ -n "$target" ]] || return 1
+
+    if [[ -x "$target" ]]; then
+        echo "$target"
+        return 0
+    fi
+
+    local target_dir target_name version
+    target_dir="$(dirname "$target")"
+    target_name="$(basename "$target")"
+    version="$(_extract_python_version "$target" || true)"
+    local candidates=()
+
+    # Framework layout (macOS): <framework>/Versions/X.Y/bin/python3
+    if [[ "$target_name" == "Python" ]]; then
+        [[ -n "$version" ]] && candidates+=("$target_dir/bin/python$version")
+        candidates+=("$target_dir/bin/python3" "$target_dir/bin/python")
+    fi
+
+    # Shared lib layout (Linux): interpreter may live in ../bin/ or on PATH as pythonX.Y.
+    if [[ "$target_name" == libpython* ]]; then
+        [[ -n "$version" ]] && candidates+=(
+            "$target_dir/../bin/python$version"
+            "$target_dir/python$version"
+            "/usr/bin/python$version"
+            "/usr/local/bin/python$version"
+            "/bin/python$version"
+        )
+        candidates+=(
+            "$target_dir/../bin/python3"
+            "$target_dir/python3"
+            "$target_dir/../bin/python"
+            "$target_dir/python"
+        )
+    fi
+
+    if [[ -n "$version" ]]; then
+        local path_python
+        path_python="$(command -v "python$version" 2>/dev/null || true)"
+        [[ -n "$path_python" ]] && candidates+=("$path_python")
+    fi
+
+    local pybin
+    for pybin in "${candidates[@]}"; do
         if [[ -x "$pybin" ]]; then
             echo "$pybin"
             return 0
@@ -176,8 +257,10 @@ _read_ida_reg_python() {
     # Format: null-terminated key, 4-byte LE length, 1-byte type, then 'length' bytes of value.
     local reg_file="$1"
     [[ -f "$reg_file" ]] || return 1
+    local parser
+    parser="$(_find_host_python)" || return 1
 
-    python3 -c "
+    "$parser" -c "
 import sys
 with open(sys.argv[1], 'rb') as f:
     data = f.read()
@@ -196,10 +279,10 @@ if path.startswith('/') or path.startswith('\\\\'):
 " "$reg_file" 2>/dev/null
 }
 
-find_ida_python() {
+_find_bundled_ida_python() {
     local ida_install="$1"
 
-    # 1. Bundled Python: <IDA>/python3*/python3 (IDA 7.5+, some Windows/Linux builds)
+    # Bundled Python: <IDA>/python3*/python3 (IDA 7.5+, some Linux builds)
     for pydir in "$ida_install"/python3*/; do
         if [[ -x "$pydir/python3" ]]; then
             echo "$pydir/python3"
@@ -210,37 +293,82 @@ find_ida_python() {
         fi
     done
 
-    # 2. Older bundled layout: <IDA>/python/python3
+    # Older bundled layout: <IDA>/python/python3
     if [[ -x "$ida_install/python/python3" ]]; then
         echo "$ida_install/python/python3"
         return 0
+    elif [[ -x "$ida_install/python/python" ]]; then
+        echo "$ida_install/python/python"
+        return 0
     fi
 
-    # 3. Read Python3TargetDLL from ida.reg (works on macOS and Linux)
+    # macOS bundled framework layout: <IDA>.app/Contents/Frameworks/Python.framework/Versions/*/bin/python3
+    if [[ "$(uname)" == "Darwin" ]] && [[ "$ida_install" == */Contents/MacOS ]]; then
+        local contents_dir="${ida_install%/MacOS}"
+        for pybin in \
+            "$contents_dir/Frameworks/Python.framework/Versions/Current/bin/python3" \
+            "$contents_dir/Frameworks/Python.framework/Versions/Current/bin/python" \
+            "$contents_dir"/Frameworks/Python.framework/Versions/*/bin/python3 \
+            "$contents_dir"/Frameworks/Python.framework/Versions/*/bin/python; do
+            if [[ -x "$pybin" ]]; then
+                echo "$pybin"
+                return 0
+            fi
+        done
+    fi
+
+    return 1
+}
+
+_find_ida_configured_python() {
+    local ida_install="${1:-}"
+
+    # Read Python3TargetDLL from ida.reg first. This reflects the Python that the
+    # current IDA user profile is configured to load, which is more accurate than
+    # guessing from the filesystem when multiple IDA versions are installed.
     local ida_reg="$IDA_USER_DIR/ida.reg"
-    local dylib_path
-    if dylib_path="$(_read_ida_reg_python "$ida_reg")" && [[ -n "$dylib_path" ]]; then
+    local python_target
+    if python_target="$(_read_ida_reg_python "$ida_reg")" && [[ -n "$python_target" ]]; then
         local interp
-        if interp="$(_dylib_to_interpreter "$dylib_path")"; then
+        if interp="$(_python_target_to_interpreter "$python_target")"; then
             echo "$interp"
             return 0
         fi
     fi
 
-    # 4. idapyswitch --dry-run --auto-apply --verbose: parse the dylib it would select
+    [[ -n "$ida_install" ]] || return 1
+
+    # Fall back to idapyswitch if ida.reg is missing or does not map cleanly.
     local idapyswitch="$ida_install/idapyswitch"
     if [[ -x "$idapyswitch" ]]; then
-        local dll_path
-        dll_path="$("$idapyswitch" --dry-run --auto-apply --verbose 2>&1 \
-            | grep "Setting registry value Python3TargetDLL" \
-            | sed "s/.*to '\\(.*\\)'/\\1/" || true)"
-        if [[ -n "$dll_path" ]] && [[ -e "$dll_path" ]]; then
+        local python_target
+        python_target="$("$idapyswitch" --dry-run --auto-apply --verbose 2>&1 \
+            | sed -n "s/.*Setting registry value Python3TargetDLL to '\\(.*\\)'/\\1/p" \
+            | head -n 1 || true)"
+        if [[ -n "$python_target" ]]; then
             local interp
-            if interp="$(_dylib_to_interpreter "$dll_path")"; then
+            if interp="$(_python_target_to_interpreter "$python_target")"; then
                 echo "$interp"
                 return 0
             fi
         fi
+    fi
+
+    return 1
+}
+
+find_ida_python() {
+    local ida_install="${1:-}"
+
+    local ida_python
+    if ida_python="$(_find_ida_configured_python "$ida_install")"; then
+        echo "$ida_python"
+        return 0
+    fi
+
+    if [[ -n "$ida_install" ]] && ida_python="$(_find_bundled_ida_python "$ida_install")"; then
+        echo "$ida_python"
+        return 0
     fi
 
     return 1
@@ -261,21 +389,23 @@ install_requirements() {
     fi
 
     # 2. Try IDA's bundled/configured Python
-    local ida_install
-    if ida_install="$(find_ida_install_dir)"; then
+    local ida_install=""
+    ida_install="$(find_ida_install_dir || true)"
+    if [[ -n "$ida_install" ]]; then
         info "Found IDA installation at: $ida_install"
-        local ida_python
-        if ida_python="$(find_ida_python "$ida_install")"; then
-            info "Using IDA's Python: $ida_python"
-            if "$ida_python" -m pip install --break-system-packages -r "$req" 2>/dev/null \
-               || "$ida_python" -m pip install -r "$req"; then
-                ok "Dependencies installed into IDA's Python"
-                return 0
-            fi
-            warn "pip install failed with IDA's Python, trying system fallbacks..."
-        else
-            warn "Could not find IDA's bundled Python, trying system fallbacks..."
+    fi
+
+    local ida_python
+    if ida_python="$(find_ida_python "$ida_install")"; then
+        info "Using IDA's Python: $ida_python"
+        if "$ida_python" -m pip install --break-system-packages -r "$req" 2>/dev/null \
+           || "$ida_python" -m pip install -r "$req"; then
+            ok "Dependencies installed into IDA's Python"
+            return 0
         fi
+        warn "pip install failed with IDA's Python, trying system fallbacks..."
+    elif [[ -n "$ida_install" ]]; then
+        warn "Could not find IDA's configured or bundled Python, trying system fallbacks..."
     else
         warn "Could not find IDA installation directory, trying system Python..."
     fi
