@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from rikugan.ui.markdown import _inline, _inline_formatting, md_to_html
+from rikugan.ui.markdown import _has_markdown_syntax, _inline, _inline_formatting, md_to_html
 
 
 class TestMdToHtmlEmptyAndNone(unittest.TestCase):
@@ -14,6 +14,20 @@ class TestMdToHtmlEmptyAndNone(unittest.TestCase):
     def test_plain_text_passthrough(self):
         result = md_to_html("hello world")
         self.assertIn("hello world", result)
+
+
+class TestHasMarkdownSyntax(unittest.TestCase):
+    def test_plain_text_returns_false(self):
+        self.assertFalse(_has_markdown_syntax("hello world"))
+
+    def test_newline_only_returns_false(self):
+        self.assertFalse(_has_markdown_syntax("hello\nworld"))
+
+    def test_bold_marker_returns_true(self):
+        self.assertTrue(_has_markdown_syntax("**bold**"))
+
+    def test_header_marker_returns_true(self):
+        self.assertTrue(_has_markdown_syntax("# Title"))
 
 
 class TestMdToHtmlHeaders(unittest.TestCase):

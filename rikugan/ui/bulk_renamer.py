@@ -312,6 +312,7 @@ class BulkRenamerWidget(QWidget):
         # Internal state
         self._entries: list[FunctionEntry] = []
         self._addr_to_entry: dict[int, int] = {}  # address -> index in _entries
+        self._addr_to_row: dict[int, int] = {}  # address -> current table row when unsorted/load order row
         self._paused = False
 
     def _reposition_header_check(self, _idx: int = 0, _old: int = 0, _new: int = 0) -> None:
@@ -351,6 +352,7 @@ class BulkRenamerWidget(QWidget):
         self._table.setRowCount(0)
         self._entries.clear()
         self._addr_to_entry.clear()
+        self._addr_to_row.clear()
 
         self._table.setRowCount(len(functions))
 
@@ -402,6 +404,7 @@ class BulkRenamerWidget(QWidget):
             )
             self._entries.append(entry)
             self._addr_to_entry[entry.address] = row
+            self._addr_to_row[entry.address] = row
 
             ic = entry.instruction_count
 
@@ -475,9 +478,13 @@ class BulkRenamerWidget(QWidget):
 
     def _find_row_for_address(self, address: int) -> int | None:
         """Find the current visual row for a given address (sort-safe)."""
+        cached_row = self._addr_to_row.get(address)
+        if cached_row is not None:
+            return cached_row
         for row in range(self._table.rowCount()):
             addr_item = self._table.item(row, _COL_ADDR)
             if addr_item is not None and addr_item.data(Qt.ItemDataRole.UserRole) == address:
+                self._addr_to_row[address] = row
                 return row
         return None
 

@@ -205,6 +205,7 @@ def _make_panel():
     panel._polling = False
     panel._pending_answer = False
     panel._chat_views = {}
+    panel._pending_restore_messages = {}
     panel._context_bar = None
     panel._mutation_panel = None
     panel._skills_refresh_timer = None
@@ -428,6 +429,24 @@ class TestStopSkillsRefreshTimer(unittest.TestCase):
         self.assertIsNone(panel._skills_refresh_timer)
         mock_timer.stop.assert_called_once()
         mock_timer.deleteLater.assert_called_once()
+
+
+class TestRestoreMessagesIfNeeded(unittest.TestCase):
+    def test_noop_when_no_pending_restore(self):
+        panel = _make_panel()
+        mock_view = MagicMock()
+        panel._chat_views["t1"] = mock_view
+        panel._restore_messages_if_needed("t1")
+        mock_view.restore_from_messages.assert_not_called()
+
+    def test_restores_pending_messages_once(self):
+        panel = _make_panel()
+        mock_view = MagicMock()
+        panel._chat_views["t1"] = mock_view
+        panel._pending_restore_messages["t1"] = ["m1", "m2"]
+        panel._restore_messages_if_needed("t1")
+        mock_view.restore_from_messages.assert_called_once_with(["m1", "m2"])
+        self.assertNotIn("t1", panel._pending_restore_messages)
 
 
 class TestUpdateTokenDisplay(unittest.TestCase):

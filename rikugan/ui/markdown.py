@@ -29,6 +29,11 @@ _LINK_COLOR = "#569cd6"
 _HR_COLOR = "#3c3c3c"
 _H_COLOR = "#569cd6"
 
+_MARKDOWN_HINT_RE = re.compile(
+    r"(^#{1,4}\s)|(^\s*[-*]\s+)|(^\s*\d+[.)]\s+)|```|`[^`]+`|\*\*|__|(?<!\w)\*(.+?)\*(?!\w)|(?<!\w)_(.+?)_(?!\w)|\[[^\]]+\]\([^)]+\)|^[-*_]{3,}\s*$",
+    re.MULTILINE,
+)
+
 _INLINE_CODE_STYLE = (
     f"background-color:{_CODE_BG}; color:{_CODE_FG}; "
     f"padding:1px 4px; border-radius:3px; font-family:monospace; font-size:12px;"
@@ -42,10 +47,18 @@ _BLOCK_CODE_STYLE = (
 )
 
 
+def _has_markdown_syntax(text: str) -> bool:
+    """Return True when the input likely needs markdown processing."""
+    return bool(text and _MARKDOWN_HINT_RE.search(text))
+
+
 def md_to_html(text: str) -> str:
     """Convert a Markdown string to Qt-compatible HTML."""
     if not text:
         return ""
+    if not _has_markdown_syntax(text):
+        escaped = html.escape(text).replace("\n", "<br>")
+        return re.sub(r"(<br>\s*){3,}", "<br><br>", escaped)
 
     # Phase 1: extract fenced code blocks to protect them from inline processing
     blocks: list[str] = []
