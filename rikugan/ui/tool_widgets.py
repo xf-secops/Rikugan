@@ -43,12 +43,7 @@ def _tool_card_css(
     del source
     border = accent or _TOOL_BORDER
     bg = background or _TOOL_BG
-    return (
-        f"QFrame#{object_name} {{ "
-        f"background-color: {bg}; border: 1px solid {border}; "
-        f"border-radius: {radius}px; "
-        "}"
-    )
+    return f"QFrame#{object_name} {{ background-color: {bg}; border: 1px solid {border}; border-radius: {radius}px; }}"
 
 
 def _native_text_style(
@@ -1256,9 +1251,7 @@ class ToolApprovalWidget(QFrame):
             "border-radius: 4px; padding: 4px 16px; font-size: 11px; font-weight: bold; }"
             "QToolButton:hover { background: #3fb950; }"
         )
-        self._allow_btn.setStyleSheet(
-            host_stylesheet(allow_css, allow_css)
-        )
+        self._allow_btn.setStyleSheet(host_stylesheet(allow_css, allow_css))
         self._allow_btn.clicked.connect(self._on_allow)
         btn_layout.addWidget(self._allow_btn)
 
@@ -1269,9 +1262,7 @@ class ToolApprovalWidget(QFrame):
             "border-radius: 4px; padding: 4px 16px; font-size: 11px; font-weight: bold; }"
             "QToolButton:hover { background: #2ea043; }"
         )
-        self._always_btn.setStyleSheet(
-            host_stylesheet(always_css, always_css)
-        )
+        self._always_btn.setStyleSheet(host_stylesheet(always_css, always_css))
         self._always_btn.clicked.connect(self._on_always_allow)
         btn_layout.addWidget(self._always_btn)
 
@@ -1282,9 +1273,7 @@ class ToolApprovalWidget(QFrame):
             "border-radius: 4px; padding: 4px 16px; font-size: 11px; font-weight: bold; }"
             "QToolButton:hover { background: #e04030; }"
         )
-        self._deny_btn.setStyleSheet(
-            host_stylesheet(deny_css, deny_css)
-        )
+        self._deny_btn.setStyleSheet(host_stylesheet(deny_css, deny_css))
         self._deny_btn.clicked.connect(self._on_deny)
         btn_layout.addWidget(self._deny_btn)
 
@@ -1303,9 +1292,7 @@ class ToolApprovalWidget(QFrame):
             "QToolButton { background: #1a5c2d; color: #808080; border: none; "
             "border-radius: 4px; padding: 4px 16px; font-size: 11px; }"
         )
-        self._allow_btn.setStyleSheet(
-            host_stylesheet(allowed_css, allowed_css)
-        )
+        self._allow_btn.setStyleSheet(host_stylesheet(allowed_css, allowed_css))
         if self._approved_callback is not None:
             self._approved_callback(self._tool_call_id, "allow")
 
@@ -1316,9 +1303,7 @@ class ToolApprovalWidget(QFrame):
             "QToolButton { background: #1a5c2d; color: #808080; border: none; "
             "border-radius: 4px; padding: 4px 16px; font-size: 11px; }"
         )
-        self._always_btn.setStyleSheet(
-            host_stylesheet(always_allowed_css, always_allowed_css)
-        )
+        self._always_btn.setStyleSheet(host_stylesheet(always_allowed_css, always_allowed_css))
         if self._approved_callback is not None:
             self._approved_callback(self._tool_call_id, "allow_all")
 
@@ -1329,8 +1314,6 @@ class ToolApprovalWidget(QFrame):
             "QToolButton { background: #6e1a12; color: #808080; border: none; "
             "border-radius: 4px; padding: 4px 16px; font-size: 11px; }"
         )
-        self._deny_btn.setStyleSheet(
-            host_stylesheet(denied_css, denied_css)
-        )
+        self._deny_btn.setStyleSheet(host_stylesheet(denied_css, denied_css))
         if self._approved_callback is not None:
             self._approved_callback(self._tool_call_id, "deny")

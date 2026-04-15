@@ -60,10 +60,7 @@ _TOOL_BORDER = "#3c3c3c"
 
 def _frame_css(*, background: str, border: str | None = None, radius: int = 8) -> str:
     border_css = f"border: 1px solid {border}; " if border else "border: none; "
-    return (
-        f"background-color: {background}; {border_css}"
-        f"border-radius: {radius}px;"
-    )
+    return f"background-color: {background}; {border_css}border-radius: {radius}px;"
 
 
 def _bubble_css(
@@ -119,11 +116,7 @@ def _tool_frame_style(
     del source
     border = accent or _TOOL_BORDER
     bg = background or _TOOL_BG
-    return (
-        f"QFrame#{object_name} {{ "
-        f"{_frame_css(background=bg, border=border, radius=6)} "
-        "}"
-    )
+    return f"QFrame#{object_name} {{ {_frame_css(background=bg, border=border, radius=6)} }}"
 
 
 # Re-export tool widgets so existing consumers that import from this module
