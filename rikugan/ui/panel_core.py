@@ -184,11 +184,13 @@ class _AddButtonTabBar(QTabBar):
         self._add_btn.setText("+")
         self._add_btn.setAutoRaise(True)
         self._add_btn.setFixedSize(20, 20)
-        self._add_btn.setStyleSheet(maybe_host_stylesheet(
-            "QToolButton { color: #d4d4d4; font-size: 14px; font-weight: bold; "
-            "border: none; background: transparent; }"
-            "QToolButton:hover { background: #3c3c3c; border-radius: 3px; }"
-        ))
+        self._add_btn.setStyleSheet(
+            maybe_host_stylesheet(
+                "QToolButton { color: #d4d4d4; font-size: 14px; font-weight: bold; "
+                "border: none; background: transparent; }"
+                "QToolButton:hover { background: #3c3c3c; border-radius: 3px; }"
+            )
+        )
         self._add_btn.clicked.connect(self._handle_add_tab)
 
     def set_add_tab_callback(self, callback: Callable[[], None] | None) -> None:
@@ -403,11 +405,13 @@ class RikuganPanelCore(QWidget):
         self._dependency_banner = QLabel()
         self._dependency_banner.setObjectName("dependency_banner")
         self._dependency_banner.setWordWrap(True)
-        self._dependency_banner.setStyleSheet(maybe_host_stylesheet(
-            "QLabel#dependency_banner {"
-            "background: #4b3900; color: #f5d98b; border-top: 1px solid #6b5000; "
-            "border-bottom: 1px solid #6b5000; padding: 6px 8px; font-size: 11px; }"
-        ))
+        self._dependency_banner.setStyleSheet(
+            maybe_host_stylesheet(
+                "QLabel#dependency_banner {"
+                "background: #4b3900; color: #f5d98b; border-top: 1px solid #6b5000; "
+                "border-bottom: 1px solid #6b5000; padding: 6px 8px; font-size: 11px; }"
+            )
+        )
         if self._dependency_warnings:
             self._dependency_banner.setText("Warnings: " + " ".join(self._dependency_warnings))
             layout.insertWidget(1, self._dependency_banner)
@@ -465,17 +469,19 @@ class RikuganPanelCore(QWidget):
         self._tab_bar.set_add_tab_callback(self._on_new_tab)
         self._tab_bar.set_export_tab_callback(self._on_export_tab)
         self._tab_bar.set_fork_tab_callback(self._on_fork_tab)
-        self._tab_widget.setStyleSheet(maybe_host_stylesheet(
-            "QTabWidget::pane { border: none; }"
-            "QTabBar { background: #1e1e1e; border: none; }"
-            "QTabBar::tab { background: #252526; color: #cccccc; padding: 2px 8px; "
-            "border: none; border-right: 1px solid #3c3c3c; "
-            "font-size: 11px; max-width: 140px; }"
-            "QTabBar::tab:selected { background: #1e1e1e; color: #ffffff; }"
-            "QTabBar::tab:hover { background: #2d2d2d; }"
-            "QTabBar::close-button { image: none; border: none; padding: 1px; }"
-            "QTabBar::close-button:hover { background: #c42b1c; border-radius: 2px; }"
-        ))
+        self._tab_widget.setStyleSheet(
+            maybe_host_stylesheet(
+                "QTabWidget::pane { border: none; }"
+                "QTabBar { background: #1e1e1e; border: none; }"
+                "QTabBar::tab { background: #252526; color: #cccccc; padding: 2px 8px; "
+                "border: none; border-right: 1px solid #3c3c3c; "
+                "font-size: 11px; max-width: 140px; }"
+                "QTabBar::tab:selected { background: #1e1e1e; color: #ffffff; }"
+                "QTabBar::tab:hover { background: #2d2d2d; }"
+                "QTabBar::close-button { image: none; border: none; padding: 1px; }"
+                "QTabBar::close-button:hover { background: #c42b1c; border-radius: 2px; }"
+            )
+        )
         self._tab_bar.setExpanding(False)
         self._tab_bar.setVisible(False)  # hidden until 2+ tabs
 
@@ -668,11 +674,13 @@ class RikuganPanelCore(QWidget):
         if session.subagent_logs:
             dlg = QDialog(self)
             dlg.setWindowTitle("Export Options")
-            dlg.setStyleSheet(maybe_host_stylesheet(
-                "QDialog { background: #1e1e1e; }"
-                "QLabel { color: #d4d4d4; font-size: 12px; }"
-                "QCheckBox { color: #d4d4d4; font-size: 12px; }"
-            ))
+            dlg.setStyleSheet(
+                maybe_host_stylesheet(
+                    "QDialog { background: #1e1e1e; }"
+                    "QLabel { color: #d4d4d4; font-size: 12px; }"
+                    "QCheckBox { color: #d4d4d4; font-size: 12px; }"
+                )
+            )
             layout = QVBoxLayout(dlg)
             cb = QCheckBox(f"Include subagent logs ({len(session.subagent_logs)} subagent runs)")
             cb.setChecked(True)
@@ -962,13 +970,15 @@ class RikuganPanelCore(QWidget):
         dlg.setWindowTitle("New Chat")
         dlg.setText("Start a new chat? Current conversation will be saved.")
         dlg.setInformativeText(f"Context usage: {context_pct}%")
-        dlg.setStyleSheet(maybe_host_stylesheet(
-            "QMessageBox { background: #1e1e1e; color: #d4d4d4; }"
-            "QLabel { color: #d4d4d4; font-size: 12px; }"
-            "QPushButton { background: #2d2d2d; color: #d4d4d4; border: 1px solid #3c3c3c; "
-            "border-radius: 4px; padding: 6px 16px; font-size: 11px; min-width: 80px; }"
-            "QPushButton:hover { background: #3c3c3c; }"
-        ))
+        dlg.setStyleSheet(
+            maybe_host_stylesheet(
+                "QMessageBox { background: #1e1e1e; color: #d4d4d4; }"
+                "QLabel { color: #d4d4d4; font-size: 12px; }"
+                "QPushButton { background: #2d2d2d; color: #d4d4d4; border: 1px solid #3c3c3c; "
+                "border-radius: 4px; padding: 6px 16px; font-size: 11px; min-width: 80px; }"
+                "QPushButton:hover { background: #3c3c3c; }"
+            )
+        )
         yes_btn = dlg.addButton("Yes", QMessageBox.ButtonRole.AcceptRole)
         clear_btn = dlg.addButton(
             f"Yes, clear context ({context_pct}% used)",

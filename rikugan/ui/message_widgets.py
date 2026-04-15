@@ -82,12 +82,10 @@ def _tool_frame_style(
     border = accent or blend_theme_color(colors["mid"], colors["window"], 0.35)
     bg = background or colors["alt_base"]
     return host_stylesheet(
-        (
-        f"QFrame#{object_name} {{ background-color: {bg}; border: 1px solid {border}; "
-        "border-radius: 6px; }}"
-        ),
+        (f"QFrame#{object_name} {{ background-color: {bg}; border: 1px solid {border}; border-radius: 6px; }}}}"),
         f"QFrame#{object_name} {{ background: transparent; border: none; }}",
     )
+
 
 # Re-export tool widgets so existing consumers that import from this module
 # continue to work without changes.

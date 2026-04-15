@@ -90,20 +90,24 @@ class PlanView(QFrame):
         btn_layout = QHBoxLayout()
 
         self._approve_btn = QPushButton("Approve & Execute")
-        self._approve_btn.setStyleSheet(maybe_host_stylesheet(
-            "QPushButton { background: #2ea043; color: white; border: none; "
-            "border-radius: 6px; padding: 6px 16px; font-weight: bold; }"
-            "QPushButton:hover { background: #3fb950; }"
-        ))
+        self._approve_btn.setStyleSheet(
+            maybe_host_stylesheet(
+                "QPushButton { background: #2ea043; color: white; border: none; "
+                "border-radius: 6px; padding: 6px 16px; font-weight: bold; }"
+                "QPushButton:hover { background: #3fb950; }"
+            )
+        )
         self._approve_btn.clicked.connect(self._fire_approved)
         btn_layout.addWidget(self._approve_btn)
 
         self._reject_btn = QPushButton("Reject")
-        self._reject_btn.setStyleSheet(maybe_host_stylesheet(
-            "QPushButton { background: #c72e2e; color: white; border: none; "
-            "border-radius: 6px; padding: 6px 16px; font-weight: bold; }"
-            "QPushButton:hover { background: #d73a49; }"
-        ))
+        self._reject_btn.setStyleSheet(
+            maybe_host_stylesheet(
+                "QPushButton { background: #c72e2e; color: white; border: none; "
+                "border-radius: 6px; padding: 6px 16px; font-weight: bold; }"
+                "QPushButton:hover { background: #d73a49; }"
+            )
+        )
         self._reject_btn.clicked.connect(self._fire_rejected)
         btn_layout.addWidget(self._reject_btn)
 

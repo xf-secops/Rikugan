@@ -73,8 +73,7 @@ _COMBO_STYLE = maybe_host_stylesheet(
 _STATUS_LABEL_STYLE = maybe_host_stylesheet("color: #808080; font-size: 11px;")
 
 _PREVIEW_STYLE = maybe_host_stylesheet(
-    "QTextEdit { background: #252525; color: #d4d4d4; border: 1px solid #3c3c3c; "
-    "font-size: 11px; padding: 4px; }"
+    "QTextEdit { background: #252525; color: #d4d4d4; border: 1px solid #3c3c3c; font-size: 11px; padding: 4px; }"
 )
 
 

@@ -30,8 +30,8 @@ _MARKDOWN_HINT_RE = re.compile(
 def _theme_markdown_styles(source=None) -> dict[str, str]:
     if use_native_host_theme():
         return {
-            "inline_code_style": 'font-family:Consolas,"Courier New",monospace;',
-            "block_code_style": 'font-family:Consolas,"Courier New",monospace; white-space:pre-wrap;',
+            "inline_code_style": "font-family:monospace;",
+            "block_code_style": "font-family:monospace; white-space:pre-wrap;",
             "link_style": "text-decoration: underline;",
             "hr_style": "",
             "heading_style": "font-weight:bold;",
@@ -81,11 +81,7 @@ def md_to_html(text: str, source=None) -> str:
     def _stash_block(m: re.Match) -> str:
         lang = m.group(1) or ""
         code = html.escape(m.group(2).strip("\n"))
-        lang_tag = (
-            f'<span style="{theme["lang_tag_style"]}">{html.escape(lang)}</span><br>'
-            if lang
-            else ""
-        )
+        lang_tag = f'<span style="{theme["lang_tag_style"]}">{html.escape(lang)}</span><br>' if lang else ""
         block_html = f'<div style="{theme["block_code_style"]}">{lang_tag}{code}</div>'
         blocks.append(block_html)
         return f"\x00BLOCK{len(blocks) - 1}\x00"

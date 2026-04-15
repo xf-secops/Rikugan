@@ -47,8 +47,9 @@ def _native_text_style(
         parts.append('font-family: Consolas, "Courier New", monospace;')
     return " ".join(parts)
 
+
 # ---------------------------------------------------------------------------
-# MCP prefix stripping — works with any MCP server, not just a specific one
+# MCP prefix stripping - works with any MCP server, not just a specific one
 # ---------------------------------------------------------------------------
 
 
@@ -63,7 +64,7 @@ def _strip_mcp_prefix(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tool-specific colors (by base name — MCP prefix is stripped before lookup)
+# Tool-specific colors (by base name - MCP prefix is stripped before lookup)
 # ---------------------------------------------------------------------------
 _TOOL_COLORS: dict[str, str] = {}
 
@@ -235,14 +236,14 @@ def _format_tool_summary(tool_name: str, args_text: str) -> str:
         old = _get("old_name", "current_name", "ea")
         new = _get("new_name")
         if old and new:
-            summary = f"{old} → {new}"
+            summary = f"{old} \u2192 {new}"
 
     elif short_name in ("rename_single_variable", "rename_variable"):
         func = _get("function_name", "function", "ea")
         old = _get("variable_name", "var_name", "old_name")
         new = _get("new_name")
         if old and new:
-            summary = f"{func}: {old} → {new}" if func else f"{old} → {new}"
+            summary = f"{func}: {old} \u2192 {new}" if func else f"{old} \u2192 {new}"
 
     elif short_name in ("rename_multi_variables",):
         func = _get("function_identifier", "function_name", "ea")
@@ -340,7 +341,7 @@ def _format_tool_summary(tool_name: str, args_text: str) -> str:
         reason = _get("reason")
         if reason and len(reason) > 40:
             reason = reason[:37] + "..."
-        summary = f"→ {phase}" + (f": {reason}" if reason else "")
+        summary = f"\u2192 {phase}" + (f": {reason}" if reason else "")
 
     else:
         # Generic: try common parameter names
@@ -367,13 +368,13 @@ def _format_tool_summary(tool_name: str, args_text: str) -> str:
 
 
 def _truncate_preview(text: str, max_lines: int = _TOOL_PREVIEW_LINES) -> str:
-    """Return first N lines with a '… +M lines' indicator if truncated."""
+    """Return first N lines with a '... +M lines' indicator if truncated."""
     lines = text.split("\n")
     if len(lines) <= max_lines:
         return text
     preview = "\n".join(lines[:max_lines])
     remaining = len(lines) - max_lines
-    return f"{preview}\n… +{remaining} lines"
+    return f"{preview}\n\u2026 +{remaining} lines"
 
 
 def _make_preview_label() -> QLabel:
@@ -460,11 +461,22 @@ class _SharedSpinnerTimer:
 class ToolCallWidget(QFrame):
     """Compact tool call display.
 
-    Shows:  ● tool_name  summary_text
+    Shows:  [dot] tool_name  summary_text
     With a collapsible detail section for args and result.
     """
 
-    _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    _SPINNER_FRAMES = (
+        "\u280b",
+        "\u2819",
+        "\u2839",
+        "\u2838",
+        "\u283c",
+        "\u2834",
+        "\u2826",
+        "\u2827",
+        "\u2807",
+        "\u280f",
+    )
 
     def __init__(self, tool_name: str, tool_call_id: str, parent: QWidget = None):
         super().__init__(parent)
@@ -487,7 +499,7 @@ class ToolCallWidget(QFrame):
         layout.addWidget(self._build_detail_section())
 
     def _build_header(self, tool_name: str) -> QHBoxLayout:
-        """Build the compact header row: toggle ● name  summary  status."""
+        """Build the compact header row: toggle bullet name summary status."""
         display_name = _strip_mcp_prefix(tool_name)
         color = _tool_color(tool_name)
 
@@ -497,12 +509,12 @@ class ToolCallWidget(QFrame):
 
         self._toggle_btn = QToolButton()
         self._toggle_btn.setObjectName("collapse_button")
-        self._toggle_btn.setText("▶")
+        self._toggle_btn.setText("\u25b6")
         self._toggle_btn.setFixedSize(14, 14)
         self._toggle_btn.clicked.connect(self._toggle)
         header_layout.addWidget(self._toggle_btn)
 
-        self._bullet = QLabel("●")
+        self._bullet = QLabel("\u25cf")
         self._bullet.setStyleSheet(
             host_stylesheet(
                 f"color: {color}; font-size: 10px;",
@@ -602,7 +614,7 @@ class ToolCallWidget(QFrame):
         self._expanded = not self._expanded
         self._detail_widget.setVisible(self._expanded)
         self._preview_label.setVisible(not self._expanded and bool(self._args_text))
-        self._toggle_btn.setText("▼" if self._expanded else "▶")
+        self._toggle_btn.setText("\u25bc" if self._expanded else "\u25b6")
 
     def set_arguments(self, args_text: str) -> None:
         self._args_text = args_text
@@ -620,7 +632,7 @@ class ToolCallWidget(QFrame):
 
     def append_args_delta(self, delta: str) -> None:
         self._args_text += delta
-        # Don't update preview during streaming — wait for set_arguments
+        # Don't update preview during streaming - wait for set_arguments
 
     def set_result(self, result: str, is_error: bool = False) -> None:
         self._stop_spinner()
@@ -637,7 +649,7 @@ class ToolCallWidget(QFrame):
                     _native_text_style(size=11, monospace=True),
                 )
             )
-            self._status_label.setText("✗")
+            self._status_label.setText("\u2717")
             self._status_label.setStyleSheet(
                 host_stylesheet(
                     "color: #f44747; font-size: 10px;",
@@ -654,9 +666,9 @@ class ToolCallWidget(QFrame):
             self._expanded = True
             self._detail_widget.setVisible(True)
             self._preview_label.setVisible(False)
-            self._toggle_btn.setText("▼")
+            self._toggle_btn.setText("\u25bc")
         else:
-            self._status_label.setText("✓")
+            self._status_label.setText("\u2713")
             self._status_label.setStyleSheet(
                 host_stylesheet(
                     "color: #4ec9b0; font-size: 10px;",
@@ -666,8 +678,8 @@ class ToolCallWidget(QFrame):
 
     def mark_done(self) -> None:
         self._stop_spinner()
-        if self._status_label.text() not in ("✓", "✗"):
-            self._status_label.setText("✓")
+        if self._status_label.text() not in ("\u2713", "\u2717"):
+            self._status_label.setText("\u2713")
             self._status_label.setStyleSheet(
                 host_stylesheet(
                     "color: #4ec9b0; font-size: 10px;",
@@ -681,14 +693,14 @@ class ToolCallWidget(QFrame):
 
 
 # ---------------------------------------------------------------------------
-# Tool batch widget — groups N consecutive calls to the same tool
+# Tool batch widget - groups N consecutive calls to the same tool
 # ---------------------------------------------------------------------------
 
 
 class ToolBatchWidget(QFrame):
     """Groups consecutive calls to the same tool.
 
-    Shows:  ● tool_name  (N calls)
+    Shows:  [dot] tool_name  (N calls)
     With preview of the first call's args.
     """
 
@@ -713,7 +725,7 @@ class ToolBatchWidget(QFrame):
         layout.addWidget(self._build_detail_section())
 
     def _build_header(self, tool_name: str) -> QHBoxLayout:
-        """Build the compact header row: toggle ● name  count  status."""
+        """Build the compact header row: toggle bullet name count status."""
         display_name = _strip_mcp_prefix(tool_name)
         color = _tool_color(tool_name)
 
@@ -723,12 +735,12 @@ class ToolBatchWidget(QFrame):
 
         self._toggle_btn = QToolButton()
         self._toggle_btn.setObjectName("collapse_button")
-        self._toggle_btn.setText("▶")
+        self._toggle_btn.setText("\u25b6")
         self._toggle_btn.setFixedSize(14, 14)
         self._toggle_btn.clicked.connect(self._toggle)
         header_layout.addWidget(self._toggle_btn)
 
-        self._bullet = QLabel("●")
+        self._bullet = QLabel("\u25cf")
         self._bullet.setStyleSheet(
             host_stylesheet(
                 f"color: {color}; font-size: 10px;",
@@ -756,7 +768,7 @@ class ToolBatchWidget(QFrame):
         )
         header_layout.addWidget(self._count_label, 1)
 
-        self._status_label = QLabel("…")
+        self._status_label = QLabel("\u2026")
         self._status_label.setStyleSheet(
             host_stylesheet(
                 "color: #dcdcaa; font-size: 10px;",
@@ -843,7 +855,7 @@ class ToolBatchWidget(QFrame):
         done = len(self._results) + len(self._errors)
         if done >= self._count:
             if self._errors:
-                self._status_label.setText(f"✓{len(self._results)} ✗{len(self._errors)}")
+                self._status_label.setText(f"\u2713{len(self._results)} \u2717{len(self._errors)}")
                 self._status_label.setStyleSheet(
                     host_stylesheet(
                         "color: #f44747; font-size: 10px;",
@@ -851,7 +863,7 @@ class ToolBatchWidget(QFrame):
                     )
                 )
             else:
-                self._status_label.setText("✓")
+                self._status_label.setText("\u2713")
                 self._status_label.setStyleSheet(
                     host_stylesheet(
                         "color: #4ec9b0; font-size: 10px;",
@@ -865,7 +877,7 @@ class ToolBatchWidget(QFrame):
         self._expanded = not self._expanded
         self._detail_widget.setVisible(self._expanded)
         self._preview_label.setVisible(not self._expanded and bool(self._first_args))
-        self._toggle_btn.setText("▼" if self._expanded else "▶")
+        self._toggle_btn.setText("\u25bc" if self._expanded else "\u25b6")
 
     @property
     def tool_name(self) -> str:
@@ -877,7 +889,7 @@ class ToolBatchWidget(QFrame):
 
 
 # ---------------------------------------------------------------------------
-# Tool group widget — collapsible container for runs of tool calls
+# Tool group widget - collapsible container for runs of tool calls
 # ---------------------------------------------------------------------------
 
 
@@ -897,14 +909,14 @@ class ToolGroupWidget(QFrame):
         layout.setContentsMargins(6, 3, 6, 3)
         layout.setSpacing(0)
 
-        # Header: ▶ <summary label>  ✓
+        # Header: > <summary label> ok
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(6)
 
         self._toggle_btn = QToolButton()
         self._toggle_btn.setObjectName("collapse_button")
-        self._toggle_btn.setText("▶")
+        self._toggle_btn.setText("\u25b6")
         self._toggle_btn.setFixedSize(14, 14)
         self._toggle_btn.clicked.connect(self._toggle)
         header_layout.addWidget(self._toggle_btn)
@@ -958,7 +970,7 @@ class ToolGroupWidget(QFrame):
         if self._done >= self._count:
             if self._errors:
                 ok = self._done - self._errors
-                self._status_label.setText(f"✓{ok} ✗{self._errors}")
+                self._status_label.setText(f"\u2713{ok} \u2717{self._errors}")
                 self._status_label.setStyleSheet(
                     host_stylesheet(
                         "color: #f44747; font-size: 10px;",
@@ -966,7 +978,7 @@ class ToolGroupWidget(QFrame):
                     )
                 )
             else:
-                self._status_label.setText("✓")
+                self._status_label.setText("\u2713")
                 self._status_label.setStyleSheet(
                     host_stylesheet(
                         "color: #4ec9b0; font-size: 10px;",
@@ -985,7 +997,7 @@ class ToolGroupWidget(QFrame):
     def _toggle(self) -> None:
         self._expanded = not self._expanded
         self._body.setVisible(self._expanded)
-        self._toggle_btn.setText("▼" if self._expanded else "▶")
+        self._toggle_btn.setText("\u25bc" if self._expanded else "\u25b6")
 
     @property
     def count(self) -> int:
@@ -1000,7 +1012,7 @@ class ToolGroupWidget(QFrame):
 class _PythonHighlighter(QSyntaxHighlighter):
     """Minimal VS Code-dark-style Python syntax highlighter."""
 
-    _RULES: ClassVar[list] = []  # built once in __init_subclass__ — see below
+    _RULES: ClassVar[list] = []  # built once in __init_subclass__ - see below
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1145,7 +1157,7 @@ class ToolApprovalWidget(QFrame):
         code = self._extract_code(args_text)
         code_lines = code.strip().splitlines() if code.strip() else []
 
-        self._info = QLabel(f"Python code — {len(code_lines)} line{'s' if len(code_lines) != 1 else ''}")
+        self._info = QLabel(f"Python code - {len(code_lines)} line{'s' if len(code_lines) != 1 else ''}")
         self._info.setStyleSheet(
             host_stylesheet(
                 "color: #808080; font-size: 10px;",

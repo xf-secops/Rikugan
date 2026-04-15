@@ -19,10 +19,7 @@ class DependencyStatus:
 
     @property
     def warning(self) -> str:
-        return (
-            f"{self.package_name} missing: {self.feature} will be unavailable "
-            f"(install `{self.package_name}`)."
-        )
+        return f"{self.package_name} missing: {self.feature} will be unavailable (install `{self.package_name}`)."
 
 
 _OPTIONAL_DEPENDENCIES: tuple[tuple[str, str, str, str], ...] = (

@@ -349,11 +349,13 @@ class SettingsDialog(QDialog):
 
         self._fetch_btn = QPushButton("Refresh")
         self._fetch_btn.setFixedWidth(70)
-        self._fetch_btn.setStyleSheet(maybe_host_stylesheet(
-            "QPushButton { background: #2d2d2d; color: #d4d4d4; border: 1px solid #3c3c3c; "
-            "border-radius: 4px; padding: 4px; font-size: 11px; }"
-            "QPushButton:hover { background: #3c3c3c; }"
-        ))
+        self._fetch_btn.setStyleSheet(
+            maybe_host_stylesheet(
+                "QPushButton { background: #2d2d2d; color: #d4d4d4; border: 1px solid #3c3c3c; "
+                "border-radius: 4px; padding: 4px; font-size: 11px; }"
+                "QPushButton:hover { background: #3c3c3c; }"
+            )
+        )
         self._fetch_btn.clicked.connect(self._fetch_models)
         model_layout.addWidget(self._fetch_btn)
 
