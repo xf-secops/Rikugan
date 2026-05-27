@@ -80,8 +80,6 @@ class LLMProvider(ABC):
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None,
-        temperature: float,
-        max_tokens: int,
         system: str,
     ) -> dict[str, Any]:
         """Assemble the full request kwargs for the provider SDK call."""
@@ -117,8 +115,6 @@ class LLMProvider(ABC):
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.3,
-        max_tokens: int = 4096,
         system: str = "",
     ) -> Message:
         """Non-streaming chat completion.
@@ -127,7 +123,7 @@ class LLMProvider(ABC):
         get client -> build kwargs -> call API -> normalize response.
         """
         client = self._get_client()
-        kwargs = self._build_request_kwargs(messages, tools, temperature, max_tokens, system)
+        kwargs = self._build_request_kwargs(messages, tools, system)
         try:
             raw = self._call_api(client, kwargs)
         except Exception as e:
@@ -138,8 +134,6 @@ class LLMProvider(ABC):
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.3,
-        max_tokens: int = 4096,
         system: str = "",
     ) -> Generator[StreamChunk, None, None]:
         """Streaming chat completion.
@@ -148,7 +142,7 @@ class LLMProvider(ABC):
         provider-specific streaming state machine.
         """
         client = self._get_client()
-        kwargs = self._build_request_kwargs(messages, tools, temperature, max_tokens, system)
+        kwargs = self._build_request_kwargs(messages, tools, system)
         yield from self._stream_chunks(client, kwargs)
 
     # -- Concrete shared implementations ---------------------------------------
@@ -191,9 +185,9 @@ class LLMProvider(ABC):
             return "API Key", "ok"
         return "", "none"
 
-    def supports_temperature(self) -> bool:
-        """Return whether the active model accepts an explicit temperature."""
-        return self.capabilities.supports_temperature
+    def context_window(self) -> int:
+        """Return the provider/model context window used for trimming."""
+        return self.capabilities.max_context_window
 
     def validate_key(self) -> bool:
         """Probe whether current credentials can reach the API.

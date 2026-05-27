@@ -1,4 +1,4 @@
-"""Settings dialog for provider, model, API key, and temperature configuration."""
+"""Settings dialog for provider, model, API key, and behavior configuration."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from .qt_compat import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -140,22 +139,6 @@ class _AddProviderDialog(QDialog):
         self._base_edit.setPlaceholderText(_CUSTOM_PROVIDER_URL_PLACEHOLDER)
         form.addRow("API Base URL:", self._base_edit)
 
-        self._context_spin = QSpinBox()
-        self._context_spin.setRange(4096, 2000000)
-        self._context_spin.setSingleStep(10000)
-        self._context_spin.setValue(128000)
-        form.addRow("Context Window:", self._context_spin)
-
-        self._max_output_spin = QSpinBox()
-        self._max_output_spin.setRange(256, 128000)
-        self._max_output_spin.setSingleStep(1024)
-        self._max_output_spin.setValue(4096)
-        form.addRow("Max Output Tokens:", self._max_output_spin)
-
-        self._temperature_cb = QCheckBox("Supports temperature")
-        self._temperature_cb.setChecked(True)
-        form.addRow("", self._temperature_cb)
-
         layout.addLayout(form)
 
         self._error_label = QLabel()
@@ -193,11 +176,7 @@ class _AddProviderDialog(QDialog):
         return self._base_edit.text().strip()
 
     def provider_settings(self) -> dict[str, Any]:
-        return {
-            "custom_context_window": self._context_spin.value(),
-            "custom_max_output_tokens": self._max_output_spin.value(),
-            "custom_supports_temperature": self._temperature_cb.isChecked(),
-        }
+        return {}
 
 
 class _CodexSetupDialog(QDialog):
@@ -354,8 +333,6 @@ class SettingsDialog(QDialog):
         playout = QVBoxLayout(provider_tab)
         self._provider_group = self._build_provider_group()
         playout.addWidget(self._provider_group)
-        self._generation_group = self._build_generation_group()
-        playout.addWidget(self._generation_group)
         self._behavior_group = self._build_behavior_group()
         playout.addWidget(self._behavior_group)
         playout.addStretch()
@@ -384,7 +361,6 @@ class SettingsDialog(QDialog):
 
         # Connect provider/key change signals AFTER everything is built
         self._provider_combo.currentTextChanged.connect(self._on_provider_changed)
-        self._model_combo.currentTextChanged.connect(lambda _text: self._update_generation_option_visibility())
         self._api_key_edit.editingFinished.connect(self._on_key_edited)
 
     def _build_provider_group(self) -> QGroupBox:
@@ -495,33 +471,6 @@ class SettingsDialog(QDialog):
         self._model_status.setWordWrap(True)
         model_layout.addWidget(self._model_status)
         return model_layout
-
-    def _build_generation_group(self) -> QGroupBox:
-        """Build the Generation settings group box."""
-        gen_group = QGroupBox("Generation")
-        gen_form = QFormLayout(gen_group)
-
-        self._temp_spin = QDoubleSpinBox()
-        self._temp_spin.setRange(0.0, 2.0)
-        self._temp_spin.setSingleStep(0.05)
-        self._temp_spin.setDecimals(2)
-        self._temp_spin.setValue(self._config.provider.temperature)
-        self._temp_label = QLabel("Temperature:")
-        gen_form.addRow(self._temp_label, self._temp_spin)
-
-        self._max_tokens_spin = QSpinBox()
-        self._max_tokens_spin.setRange(256, 128000)
-        self._max_tokens_spin.setSingleStep(1024)
-        self._max_tokens_spin.setValue(self._config.provider.max_tokens)
-        gen_form.addRow("Max Output Tokens:", self._max_tokens_spin)
-
-        self._context_spin = QSpinBox()
-        self._context_spin.setRange(4096, 2000000)
-        self._context_spin.setSingleStep(10000)
-        self._context_spin.setValue(self._config.provider.context_window)
-        gen_form.addRow("Context Window:", self._context_spin)
-
-        return gen_group
 
     def _build_behavior_group(self) -> QGroupBox:
         """Build the Behavior settings group box."""
@@ -659,9 +608,6 @@ class SettingsDialog(QDialog):
         self._api_key_edit.setText(self._config.provider.api_key)
         self._api_base_edit.setText(self._config.provider.api_base)
         self._model_combo.setCurrentText(self._config.provider.model)
-        self._temp_spin.setValue(self._config.provider.temperature)
-        self._max_tokens_spin.setValue(self._config.provider.max_tokens)
-        self._context_spin.setValue(self._config.provider.context_window)
         self._model_restore_hint = self._config.provider.model.strip()
 
         # Auto-fill API base for providers that need it
@@ -685,7 +631,6 @@ class SettingsDialog(QDialog):
             self._api_key_edit.setPlaceholderText("API key")
 
         self._update_auth_status()
-        self._update_generation_option_visibility()
         self._fetch_models()
 
     def _on_key_edited(self) -> None:
@@ -809,53 +754,11 @@ class SettingsDialog(QDialog):
             self._model_status.setText("Type model name manually")
             self._model_status.setStyleSheet(maybe_host_stylesheet("color: #808080; font-size: 10px;"))
 
-        # Auto-fill generation defaults based on selected model
-        self._update_generation_defaults()
-        self._update_generation_option_visibility()
-
     def _on_fetch_error(self, error: str) -> None:
         self._fetch_btn.setEnabled(True)
         self._model_status.setText(error)
         self._model_status.setStyleSheet(maybe_host_stylesheet("color: #f44747; font-size: 10px;"))
         self._model_restore_hint = ""
-
-    def _update_generation_defaults(self) -> None:
-        model_id = self._get_selected_model_id()
-        for m in self._fetched_models:
-            if m.id == model_id:
-                # Only apply model defaults when the user selected a
-                # different model.  If the model matches the saved config,
-                # the user may have intentionally customized context_window
-                # — don't overwrite it with the model's default.
-                if model_id != self._config.provider.model:
-                    self._context_spin.setValue(m.context_window)
-                self._max_tokens_spin.setValue(min(m.max_output_tokens, 128000))
-                break
-        self._update_generation_option_visibility()
-
-    def _update_generation_option_visibility(self) -> None:
-        if not hasattr(self, "_temp_label"):
-            return
-        model_id = self._get_selected_model_id()
-        supports_temp = True
-        for m in self._fetched_models:
-            if m.id == model_id:
-                supports_temp = getattr(m, "supports_temperature", True)
-                break
-        else:
-            provider = self._provider_combo.currentText()
-            if provider == "codex":
-                supports_temp = False
-            elif provider == "anthropic" and "opus-4-7" in model_id.lower():
-                supports_temp = False
-            elif provider == "openai" and model_id.lower().startswith(("o1", "o3", "o4", "gpt-5", "codex")):
-                supports_temp = False
-            elif self._config.is_custom_provider(provider):
-                supports_temp = bool(
-                    self._config.custom_providers.get(provider, {}).get("custom_supports_temperature", True)
-                )
-        self._temp_label.setVisible(supports_temp)
-        self._temp_spin.setVisible(supports_temp)
 
     def _provider_extra_for(self, provider: str) -> dict[str, Any]:
         if self._config.is_custom_provider(provider):
@@ -897,8 +800,6 @@ class SettingsDialog(QDialog):
         # Initialize settings for the new provider
         self._config.switch_provider(name)
         self._config.provider.api_base = api_base
-        self._config.provider.context_window = dlg.provider_settings()["custom_context_window"]
-        self._config.provider.max_tokens = dlg.provider_settings()["custom_max_output_tokens"]
         self._config.provider.extra = dlg.provider_settings()
         # Rebuild combo and select the new provider
         self._provider_combo.currentTextChanged.disconnect(self._on_provider_changed)
@@ -926,15 +827,8 @@ class SettingsDialog(QDialog):
         self._config.provider.model = self._get_selected_model_id()
         self._config.provider.api_key = self._api_key_edit.text().strip()
         self._config.provider.api_base = self._api_base_edit.text().strip()
-        self._config.provider.temperature = self._temp_spin.value()
-        self._config.provider.max_tokens = self._max_tokens_spin.value()
-        self._config.provider.context_window = self._context_spin.value()
         if self._config.is_custom_provider(provider_name):
-            self._config.provider.extra = {
-                "custom_context_window": self._context_spin.value(),
-                "custom_max_output_tokens": self._max_tokens_spin.value(),
-                "custom_supports_temperature": self._temp_spin.isVisible(),
-            }
+            self._config.provider.extra = dict(self._config.custom_providers.get(provider_name, {}))
             self._config.custom_providers[provider_name] = dict(self._config.provider.extra)
 
     # --- Accept ---
@@ -1007,9 +901,6 @@ class SettingsDialog(QDialog):
         # ONLY save what the user explicitly typed — never save auto-resolved OAuth tokens
         self._config.provider.api_key = self._api_key_edit.text().strip()
         self._config.provider.api_base = self._api_base_edit.text().strip()
-        self._config.provider.temperature = self._temp_spin.value()
-        self._config.provider.max_tokens = self._max_tokens_spin.value()
-        self._config.provider.context_window = self._context_spin.value()
         self._config.auto_context = self._auto_context_cb.isChecked()
         self._config.checkpoint_auto_save = self._auto_save_cb.isChecked()
         self._config.exploration_turn_limit = self._explore_turns_spin.value()
@@ -1018,11 +909,7 @@ class SettingsDialog(QDialog):
         self._config.preserve_context = self._preserve_context_cb.isChecked()
         self._config.oauth_consent_accepted = self._oauth_cb.isChecked()
         if self._config.is_custom_provider(self._config.provider.name):
-            self._config.provider.extra = {
-                "custom_context_window": self._context_spin.value(),
-                "custom_max_output_tokens": self._max_tokens_spin.value(),
-                "custom_supports_temperature": self._temp_spin.isVisible(),
-            }
+            self._config.provider.extra = dict(self._config.custom_providers.get(self._config.provider.name, {}))
             self._config.custom_providers[self._config.provider.name] = dict(self._config.provider.extra)
 
         # --- API key encryption handling ---

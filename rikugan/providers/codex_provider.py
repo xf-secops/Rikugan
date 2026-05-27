@@ -24,6 +24,7 @@ CODEX_ISSUER = "https://auth.openai.com"
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 CODEX_AUTH_MODE = "chatgpt"
 CODEX_ORIGINATOR = "codex_cli_rs"
+CODEX_MODELS_CLIENT_VERSION = "0.133.0"
 
 
 @dataclass
@@ -41,6 +42,14 @@ def codex_home() -> Path:
 
 def _auth_path() -> Path:
     return codex_home() / "auth.json"
+
+
+def _models_cache_path() -> Path:
+    return codex_home() / "models_cache.json"
+
+
+def _version_path() -> Path:
+    return codex_home() / "version.json"
 
 
 def _decode_jwt_payload(jwt: str) -> dict[str, Any]:
@@ -84,6 +93,17 @@ def _id_token_info(id_token: str) -> dict[str, Any]:
         "chatgpt_account_is_fedramp": bool(auth.get("chatgpt_account_is_fedramp", False)),
         "raw_jwt": id_token,
     }
+
+
+def _codex_models_client_version() -> str:
+    for path, key in ((_models_cache_path(), "client_version"), (_version_path(), "latest_version")):
+        try:
+            value = json.loads(path.read_text()).get(key)
+        except (OSError, json.JSONDecodeError, AttributeError):
+            continue
+        if isinstance(value, str) and value:
+            return value
+    return CODEX_MODELS_CLIENT_VERSION
 
 
 def _request_json(
@@ -234,11 +254,7 @@ class CodexProvider(LLMProvider):
             max_context_window=272000,
             max_output_tokens=128000,
             supports_system_prompt=True,
-            supports_temperature=False,
         )
-
-    def supports_temperature(self) -> bool:
-        return False
 
     def auth_status(self) -> tuple[str, str]:
         return codex_auth_status()
@@ -321,14 +337,61 @@ class CodexProvider(LLMProvider):
 
     def _fetch_models_live(self) -> list[ModelInfo]:
         self._load_auth()
-        return self._builtin_models()
+        client_version = urllib.parse.quote(_codex_models_client_version(), safe="")
+        response = self._request("GET", f"models?client_version={client_version}", None, stream=False)
+        models = response.get("models") if isinstance(response, dict) else None
+        if not isinstance(models, list):
+            raise ProviderError("Codex models endpoint returned no models list", provider="codex")
+
+        parsed = [m for item in models if (m := self._parse_model_info(item)) is not None]
+        if not parsed:
+            raise ProviderError("Codex models endpoint returned no visible models", provider="codex")
+        return parsed
+
+    def _parse_model_info(self, item: Any) -> ModelInfo | None:
+        if not isinstance(item, dict):
+            return None
+        model_id = str(item.get("slug") or item.get("id") or "").strip()
+        if not model_id:
+            return None
+        if str(item.get("visibility") or "list").lower() in {"hide", "hidden"}:
+            return None
+
+        context_window = self._positive_int(item.get("context_window")) or self.capabilities.max_context_window
+        max_output = (
+            self._positive_int(item.get("max_output_tokens"))
+            or self._positive_int(item.get("output_token_limit"))
+            or self.capabilities.max_output_tokens
+        )
+        input_modalities = item.get("input_modalities")
+        supports_vision = True
+        if isinstance(input_modalities, list):
+            supports_vision = "image" in {str(modality).lower() for modality in input_modalities}
+
+        return ModelInfo(
+            id=model_id,
+            name=str(item.get("display_name") or model_id),
+            provider="codex",
+            context_window=context_window,
+            max_output_tokens=max_output,
+            supports_tools=bool(item.get("supports_parallel_tool_calls", True)),
+            supports_vision=supports_vision,
+        )
+
+    @staticmethod
+    def _positive_int(value: Any) -> int | None:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
 
     @staticmethod
     def _builtin_models() -> list[ModelInfo]:
         return [
-            ModelInfo("gpt-5.4", "GPT-5.4", "codex", 272000, 128000, True, True, False),
-            ModelInfo("gpt-5.2-codex", "GPT-5.2 Codex", "codex", 272000, 128000, True, True, False),
-            ModelInfo("gpt-5-codex", "GPT-5 Codex", "codex", 272000, 128000, True, True, False),
+            ModelInfo("gpt-5.4", "GPT-5.4", "codex", 272000, 128000, True, True),
+            ModelInfo("gpt-5.2-codex", "GPT-5.2 Codex", "codex", 272000, 128000, True, True),
+            ModelInfo("gpt-5-codex", "GPT-5 Codex", "codex", 272000, 128000, True, True),
         ]
 
     def _format_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
@@ -392,27 +455,28 @@ class CodexProvider(LLMProvider):
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None,
-        temperature: float,
-        max_tokens: int,
         system: str,
     ) -> dict[str, Any]:
-        return {
+        kwargs: dict[str, Any] = {
             "model": self.model,
-            "instructions": system,
             "input": self._format_messages(messages),
-            "tools": self._format_tools(tools),
-            "tool_choice": "auto",
-            "parallel_tool_calls": True,
-            "max_output_tokens": max_tokens,
             "store": False,
             "stream": True,
-            "include": [],
         }
+        if system:
+            kwargs["instructions"] = system
+        formatted_tools = self._format_tools(tools)
+        if formatted_tools:
+            kwargs["tools"] = formatted_tools
+            kwargs["tool_choice"] = "auto"
+            kwargs["parallel_tool_calls"] = True
+        return kwargs
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None, stream: bool) -> Any:
         url = f"{self.api_base.rstrip('/')}/{path.lstrip('/')}"
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         headers = self._headers()
+        headers["Accept"] = "text/event-stream" if stream else "application/json"
         if payload is not None:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=data, headers=headers, method=method)

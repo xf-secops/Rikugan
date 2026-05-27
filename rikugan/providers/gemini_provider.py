@@ -252,17 +252,12 @@ class GeminiProvider(LLMProvider):
 
     def _build_config(
         self,
-        temperature: float,
-        max_tokens: int,
         system: str,
         tools: list[dict[str, Any]] | None = None,
     ):
         """Build a ``GenerateContentConfig``."""
         types = self._types
-        kwargs: dict[str, Any] = {
-            "temperature": temperature,
-            "max_output_tokens": max_tokens,
-        }
+        kwargs: dict[str, Any] = {}
         if system:
             kwargs["system_instruction"] = system
         if tools:
@@ -274,15 +269,13 @@ class GeminiProvider(LLMProvider):
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None,
-        temperature: float,
-        max_tokens: int,
         system: str,
     ) -> dict[str, Any]:
         """Build kwargs dict for Gemini generate_content / generate_content_stream."""
         return {
             "model": self.model,
             "contents": self._build_contents(messages),
-            "config": self._build_config(temperature, max_tokens, system, tools),
+            "config": self._build_config(system, tools),
         }
 
     def _call_api(self, client: Any, kwargs: dict[str, Any]) -> Any:

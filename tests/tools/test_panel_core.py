@@ -27,20 +27,22 @@ for _mod_name in [
     "rikugan.providers.ollama_provider",
     "rikugan.providers.registry",
 ]:
-    if _mod_name not in sys.modules:
+    _stub = sys.modules.get(_mod_name)
+    if _stub is None:
         _stub = types.ModuleType(_mod_name)
-        for _attr in [
-            "DARK_THEME", "build_theme_stylesheet", "maybe_host_stylesheet", "use_native_host_theme",
-            "ChatView", "InputArea", "ContextBar",
-            "_SharedSpinnerTimer", "RikuganConfig",
-            "log_error", "log_info", "log_debug", "log_warning",
-            "TurnEvent", "TurnEventType", "MutationRecord",
-            "Role", "ModelInfo",
-            "resolve_auth_cached", "resolve_anthropic_auth",
-            "DEFAULT_OLLAMA_URL", "ProviderRegistry",
-        ]:
-            setattr(_stub, _attr, MagicMock())
         sys.modules[_mod_name] = _stub
+    for _attr in [
+        "DARK_THEME", "build_small_button_stylesheet", "build_theme_stylesheet", "maybe_host_stylesheet", "use_native_host_theme",
+        "ChatView", "InputArea", "ContextBar",
+        "_SharedSpinnerTimer", "RikuganConfig",
+        "log_error", "log_info", "log_debug", "log_warning",
+        "TurnEvent", "TurnEventType", "MutationRecord",
+        "Role", "ModelInfo",
+        "resolve_auth_cached", "resolve_anthropic_auth",
+        "DEFAULT_OLLAMA_URL", "ProviderRegistry",
+    ]:
+        if not hasattr(_stub, _attr):
+            setattr(_stub, _attr, MagicMock())
 
 # Ensure DEFAULT_OLLAMA_URL is a string (used in comparisons)
 _ollama_stub = sys.modules.get("rikugan.providers.ollama_provider")
@@ -460,7 +462,7 @@ class TestUpdateTokenDisplay(unittest.TestCase):
         panel = _make_panel()
         mock_cb = MagicMock()
         panel._context_bar = mock_cb
-        panel._config.provider.context_window = 200000
+        panel._ctrl.get_context_window.return_value = 200000
         panel._update_token_display(5000)
         mock_cb.set_tokens.assert_called_once_with(5000, 200000)
 
@@ -468,7 +470,7 @@ class TestUpdateTokenDisplay(unittest.TestCase):
         panel = _make_panel()
         mock_cb = MagicMock()
         panel._context_bar = mock_cb
-        panel._config.provider.context_window = 0
+        panel._ctrl.get_context_window.return_value = 0
         panel._update_token_display(1234)
         mock_cb.set_tokens.assert_called_once_with(1234, 0)
 

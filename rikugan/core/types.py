@@ -144,7 +144,6 @@ class ProviderCapabilities:
     max_output_tokens: int = 4096
     supports_system_prompt: bool = True
     supports_cache_control: bool = False
-    supports_temperature: bool = True
 
 
 @dataclass
@@ -156,7 +155,6 @@ class ModelInfo:
     max_output_tokens: int = 4096
     supports_tools: bool = True
     supports_vision: bool = False
-    supports_temperature: bool = True
 
 
 @dataclass

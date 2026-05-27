@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rikugan.core.errors import AuthenticationError
+from rikugan.core.types import Message, Role
 from rikugan.providers.codex_provider import CodexProvider, _id_token_info, codex_auth_status
 
 
@@ -42,7 +43,7 @@ class TestCodexAuthFile(unittest.TestCase):
             with self.assertRaises(AuthenticationError):
                 CodexProvider().ensure_ready()
 
-    def test_validate_key_uses_local_auth_without_models_endpoint(self):
+    def test_validate_key_fetches_live_models(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"CODEX_HOME": tmp}, clear=False):
             _write_auth(
                 Path(tmp),
@@ -55,11 +56,13 @@ class TestCodexAuthFile(unittest.TestCase):
             )
             provider = CodexProvider()
 
-            with patch.object(CodexProvider, "_request", side_effect=AssertionError("unexpected network call")):
+            with patch.object(
+                CodexProvider,
+                "_request",
+                return_value={"models": [{"slug": "gpt-live", "display_name": "GPT Live", "visibility": "list"}]},
+            ) as request:
                 self.assertTrue(provider.validate_key())
-                self.assertEqual(
-                    [m.id for m in provider._fetch_models_live()], ["gpt-5.4", "gpt-5.2-codex", "gpt-5-codex"]
-                )
+                request.assert_called_once()
 
     def test_validate_key_rejects_missing_auth(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"CODEX_HOME": tmp}, clear=False):
@@ -105,6 +108,79 @@ class TestCodexHeaders(unittest.TestCase):
 
     def test_malformed_jwt_payload_is_ignored(self):
         self.assertIsNone(_id_token_info("not-a-jwt")["chatgpt_account_id"])
+
+
+class TestCodexModels(unittest.TestCase):
+    def test_fetch_models_live_uses_codex_models_endpoint(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"CODEX_HOME": tmp}, clear=False):
+            home = Path(tmp)
+            _write_auth(home, {"access_token": "access", "refresh_token": "refresh", "account_id": "acct"})
+            (home / "models_cache.json").write_text(json.dumps({"client_version": "0.133.0"}))
+            provider = CodexProvider()
+
+            with patch.object(
+                CodexProvider,
+                "_request",
+                return_value={
+                    "models": [
+                        {
+                            "slug": "gpt-5.5",
+                            "display_name": "GPT-5.5",
+                            "visibility": "list",
+                            "context_window": 272000,
+                            "supports_parallel_tool_calls": True,
+                            "input_modalities": ["text", "image"],
+                        },
+                        {
+                            "slug": "codex-auto-review",
+                            "display_name": "Codex Auto Review",
+                            "visibility": "hide",
+                        },
+                    ]
+                },
+            ) as request:
+                models = provider._fetch_models_live()
+
+        self.assertEqual([m.id for m in models], ["gpt-5.5"])
+        self.assertEqual(models[0].name, "GPT-5.5")
+        self.assertEqual(models[0].context_window, 272000)
+        self.assertTrue(models[0].supports_tools)
+        self.assertTrue(models[0].supports_vision)
+        request.assert_called_once_with("GET", "models?client_version=0.133.0", None, stream=False)
+
+
+class TestCodexRequestPayload(unittest.TestCase):
+    def test_omits_generation_knobs_and_empty_tool_fields(self):
+        provider = CodexProvider(model="gpt-5-codex")
+
+        kwargs = provider._build_request_kwargs([Message(role=Role.USER, content="hi")], tools=None, system="")
+
+        self.assertNotIn("temperature", kwargs)
+        self.assertNotIn("max_output_tokens", kwargs)
+        self.assertNotIn("tools", kwargs)
+        self.assertNotIn("tool_choice", kwargs)
+        self.assertNotIn("parallel_tool_calls", kwargs)
+        self.assertNotIn("instructions", kwargs)
+
+    def test_includes_tool_fields_only_with_tools(self):
+        provider = CodexProvider(model="gpt-5-codex")
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "Lookup a value",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+
+        kwargs = provider._build_request_kwargs([Message(role=Role.USER, content="hi")], tools=tools, system="sys")
+
+        self.assertEqual(kwargs["instructions"], "sys")
+        self.assertEqual(kwargs["tool_choice"], "auto")
+        self.assertTrue(kwargs["parallel_tool_calls"])
+        self.assertEqual(kwargs["tools"][0]["name"], "lookup")
 
 
 if __name__ == "__main__":

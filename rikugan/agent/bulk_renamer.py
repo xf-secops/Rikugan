@@ -473,8 +473,6 @@ class BulkRenamerEngine:
         response = self._provider.chat(
             messages=messages,
             tools=None,
-            temperature=0.2,
-            max_tokens=4096,
         )
 
         results: dict[int, str] = {}

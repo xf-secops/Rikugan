@@ -89,7 +89,6 @@ class ProviderRegistry:
             kwargs.setdefault("provider_name", name)
             kwargs.setdefault("context_window", int(kwargs.pop("custom_context_window", 128000)))
             kwargs.setdefault("max_output_tokens", int(kwargs.pop("custom_max_output_tokens", 4096)))
-            kwargs.setdefault("supports_temperature", bool(kwargs.pop("custom_supports_temperature", True)))
         elif self._providers.get(name) == _BUILTIN_PROVIDERS["openai_compat"] and name != "openai_compat":
             kwargs.setdefault("provider_name", name)
 

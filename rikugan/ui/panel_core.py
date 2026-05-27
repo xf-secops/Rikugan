@@ -603,7 +603,7 @@ class RikuganPanelCore(QWidget):
         session = self._ctrl.session
         has_messages = session and session.messages
         if has_messages:
-            ctx_window = self._config.provider.context_window or 200000
+            ctx_window = self._ctrl.get_context_window()
             used = (
                 session.last_prompt_tokens
                 if session.last_prompt_tokens is not None
@@ -820,7 +820,7 @@ class RikuganPanelCore(QWidget):
                 if session.last_prompt_tokens is not None
                 else session.total_usage.total_tokens
             )
-        ctx_window = self._config.provider.context_window or 0
+        ctx_window = self._ctrl.get_context_window()
         self._context_bar.set_tokens(token_count, ctx_window)
 
     def _update_tab_label(self, tab_id: str) -> None:

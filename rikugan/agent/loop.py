@@ -382,7 +382,7 @@ class AgentLoop:
         self.plan_mode = False
 
         # Context window manager — compacts history when approaching limits
-        ctx_window = getattr(config.provider, "context_window", 0) or 128000
+        ctx_window = self.provider.context_window() or 128000
         self._context_manager = ContextWindowManager(
             max_tokens=ctx_window,
             compaction_threshold=0.8,
@@ -672,7 +672,7 @@ class AgentLoop:
             issues.append("No skill registry — skills won't be available")
 
         # Check context window
-        ctx = self.config.provider.context_window
+        ctx = self.provider.context_window()
         if ctx >= _MIN_CONTEXT_WINDOW_TOKENS:
             ok.append(f"Context window: {ctx:,} tokens")
         else:
@@ -828,7 +828,7 @@ class AgentLoop:
                     self.session.messages,
                 )
 
-        ctx_window = self.config.provider.context_window
+        ctx_window = self.provider.context_window()
         provider_messages = minify_messages(
             self.session.get_messages_for_provider(
                 context_window=ctx_window,
@@ -913,8 +913,6 @@ class AgentLoop:
         stream = self.provider.chat_stream(
             messages=provider_messages,
             tools=tools_schema if tools_schema else None,
-            temperature=self.config.provider.temperature,
-            max_tokens=self.config.provider.max_tokens,
             system=system_prompt,
         )
 

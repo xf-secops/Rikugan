@@ -22,7 +22,6 @@ class OpenAICompatProvider(OpenAIProvider):
         provider_name: str = "openai_compat",
         context_window: int = 128000,
         max_output_tokens: int = 4096,
-        supports_temperature: bool = True,
         **kwargs,
     ):
         super().__init__(api_key=api_key, model=model, **kwargs)
@@ -30,7 +29,6 @@ class OpenAICompatProvider(OpenAIProvider):
         self._provider_name = provider_name
         self._context_window = context_window
         self._max_output_tokens = max_output_tokens
-        self._supports_temperature = supports_temperature
 
     def _get_client(self):
         if self._client is None:
@@ -65,11 +63,10 @@ class OpenAICompatProvider(OpenAIProvider):
             vision=False,
             max_context_window=self._context_window,
             max_output_tokens=self._max_output_tokens,
-            supports_temperature=self._supports_temperature,
         )
 
-    def supports_temperature(self) -> bool:
-        return self._supports_temperature
+    def context_window(self) -> int:
+        return self._context_window
 
     def list_models(self) -> list[ModelInfo]:
         """Fetch models from the OpenAI-compatible endpoint."""
@@ -86,7 +83,6 @@ class OpenAICompatProvider(OpenAIProvider):
                         provider=self._provider_name,
                         context_window=self._context_window,
                         max_output_tokens=self._max_output_tokens,
-                        supports_temperature=self._supports_temperature,
                     )
                 )
             if models:
@@ -104,7 +100,6 @@ class OpenAICompatProvider(OpenAIProvider):
                     self._provider_name,
                     context_window=self._context_window,
                     max_output_tokens=self._max_output_tokens,
-                    supports_temperature=self._supports_temperature,
                 )
             ]
         return []
