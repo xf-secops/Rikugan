@@ -257,6 +257,7 @@ class SessionControllerBase:
                 api_key=self.config.provider.api_key,
                 api_base=self.config.provider.api_base,
                 model=self.config.provider.model,
+                **(self.config.provider.extra or {}),
             )
             provider.ensure_ready()
             return provider
@@ -280,6 +281,7 @@ class SessionControllerBase:
                 api_key=self.config.provider.api_key,
                 api_base=self.config.provider.api_base,
                 model=self.config.provider.model,
+                **(self.config.provider.extra or {}),
             )
             provider.ensure_ready()
         except Exception as e:

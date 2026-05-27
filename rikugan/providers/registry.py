@@ -19,6 +19,7 @@ class _ProviderSpec:
 
 _BUILTIN_PROVIDERS: dict[str, _ProviderSpec] = {
     "anthropic": _ProviderSpec(".anthropic_provider", "AnthropicProvider"),
+    "codex": _ProviderSpec(".codex_provider", "CodexProvider"),
     "openai": _ProviderSpec(".openai_provider", "OpenAIProvider"),
     "openai_compat": _ProviderSpec(".openai_compat", "OpenAICompatProvider"),
     "gemini": _ProviderSpec(".gemini_provider", "GeminiProvider"),
@@ -86,6 +87,9 @@ class ProviderRegistry:
         # Custom OpenAI-compatible providers need their name passed through.
         if name not in _BUILTIN_PROVIDERS:
             kwargs.setdefault("provider_name", name)
+            kwargs.setdefault("context_window", int(kwargs.pop("custom_context_window", 128000)))
+            kwargs.setdefault("max_output_tokens", int(kwargs.pop("custom_max_output_tokens", 4096)))
+            kwargs.setdefault("supports_temperature", bool(kwargs.pop("custom_supports_temperature", True)))
         elif self._providers.get(name) == _BUILTIN_PROVIDERS["openai_compat"] and name != "openai_compat":
             kwargs.setdefault("provider_name", name)
 
@@ -109,7 +113,7 @@ class ProviderRegistry:
             inst = self._instances[name]
             key_changed = api_key != inst.api_key
             base_changed = api_base != (inst.api_base or "")
-            if key_changed or base_changed:
+            if key_changed or base_changed or (kwargs and name not in _BUILTIN_PROVIDERS):
                 return self.create(name, api_key=api_key, api_base=api_base, model=model, **kwargs)
             if model and inst.model != model:
                 inst.model = model

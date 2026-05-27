@@ -52,13 +52,13 @@ mklink /D "%APPDATA%\Hex-Rays\IDA Pro\plugins\rikugan" "<full path to cloned rep
 Install the runtime dependencies into the Python environment used by your host:
 
 ```bash
-pip install anthropic>=0.39.0 openai>=1.50.0 google-genai>=1.0.0 tomli>=2.0.0
+pip install -r requirements.txt
 ```
 
 For development tooling (CI checks, running tests locally):
 
 ```bash
-pip install ruff mypy pytest desloppify
+uv sync --group dev
 ```
 
 ---

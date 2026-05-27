@@ -191,6 +191,10 @@ class LLMProvider(ABC):
             return "API Key", "ok"
         return "", "none"
 
+    def supports_temperature(self) -> bool:
+        """Return whether the active model accepts an explicit temperature."""
+        return self.capabilities.supports_temperature
+
     def validate_key(self) -> bool:
         """Probe whether current credentials can reach the API.
 

@@ -65,6 +65,10 @@ class OpenAIProvider(LLMProvider):
             supports_system_prompt=True,
         )
 
+    def supports_temperature(self) -> bool:
+        model = self.model.lower()
+        return not (model.startswith(("o1", "o3", "o4")) or model.startswith("gpt-5") or model.startswith("codex"))
+
     def _fetch_models_live(self) -> list[ModelInfo]:
         """Fetch chat-capable models from the OpenAI API."""
         client = self._get_client()
@@ -86,6 +90,9 @@ class OpenAIProvider(LLMProvider):
                 continue
             if any(s in m.id for s in skip_words):
                 continue
+            supports_temperature = not (
+                m.id.startswith(("o1", "o3", "o4")) or m.id.startswith("gpt-5") or m.id.startswith("codex")
+            )
             models.append(
                 ModelInfo(
                     id=m.id,
@@ -95,6 +102,7 @@ class OpenAIProvider(LLMProvider):
                     max_output_tokens=16384,
                     supports_tools=True,
                     supports_vision=True,
+                    supports_temperature=supports_temperature,
                 )
             )
         models.sort(key=lambda m: m.id, reverse=True)
@@ -103,9 +111,9 @@ class OpenAIProvider(LLMProvider):
     @staticmethod
     def _builtin_models() -> list[ModelInfo]:
         return [
-            ModelInfo("gpt-4o", "GPT-4o", "openai", 128000, 16384, True, True),
-            ModelInfo("gpt-4o-mini", "GPT-4o Mini", "openai", 128000, 16384, True, True),
-            ModelInfo("o3-mini", "o3-mini", "openai", 200000, 100000, True, False),
+            ModelInfo("gpt-4o", "GPT-4o", "openai", 128000, 16384, True, True, True),
+            ModelInfo("gpt-4o-mini", "GPT-4o Mini", "openai", 128000, 16384, True, True, True),
+            ModelInfo("o3-mini", "o3-mini", "openai", 200000, 100000, True, False, False),
         ]
 
     def _format_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
@@ -211,9 +219,13 @@ class OpenAIProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": msgs,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
         }
+        if self.model.lower().startswith(("o1", "o3", "o4", "gpt-5")):
+            kwargs["max_completion_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
+        if self.supports_temperature():
+            kwargs["temperature"] = temperature
         if tools:
             kwargs["tools"] = tools
         return kwargs

@@ -38,6 +38,14 @@ class TestBuiltinModels(unittest.TestCase):
         for m in models:
             self.assertEqual(m.provider, "openai")
 
+    def test_codex_builtin_models(self):
+        from rikugan.providers.codex_provider import CodexProvider
+        models = CodexProvider._builtin_models()
+        self.assertTrue(len(models) > 0)
+        for m in models:
+            self.assertEqual(m.provider, "codex")
+            self.assertFalse(m.supports_temperature)
+
     def test_gemini_builtin_models(self):
         from rikugan.providers.gemini_provider import GeminiProvider
         models = GeminiProvider._builtin_models()

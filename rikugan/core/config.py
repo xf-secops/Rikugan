@@ -245,6 +245,7 @@ class RikuganConfig:
             "temperature": self.provider.temperature,
             "max_tokens": self.provider.max_tokens,
             "context_window": self.provider.context_window,
+            "extra": self.provider.extra,
         }
 
     def switch_provider(self, new_name: str) -> None:
@@ -264,6 +265,7 @@ class RikuganConfig:
             self.provider.temperature = saved.get("temperature", DEFAULT_TEMPERATURE)
             self.provider.max_tokens = saved.get("max_tokens", DEFAULT_MAX_TOKENS)
             self.provider.context_window = saved.get("context_window", DEFAULT_CONTEXT_WINDOW)
+            self.provider.extra = saved.get("extra", {})
         else:
             # Fresh provider — clear key/base, keep defaults
             self.provider.api_key = ""
@@ -272,10 +274,11 @@ class RikuganConfig:
             self.provider.temperature = DEFAULT_TEMPERATURE
             self.provider.max_tokens = DEFAULT_MAX_TOKENS
             self.provider.context_window = DEFAULT_CONTEXT_WINDOW
+            self.provider.extra = dict(self.custom_providers.get(new_name, {}))
 
-    def add_custom_provider(self, name: str) -> None:
+    def add_custom_provider(self, name: str, settings: dict[str, Any] | None = None) -> None:
         """Register a new custom OpenAI-compatible provider name."""
-        self.custom_providers[name] = {}
+        self.custom_providers[name] = settings or {}
 
     def remove_custom_provider(self, name: str) -> None:
         """Remove a custom provider and its saved settings."""

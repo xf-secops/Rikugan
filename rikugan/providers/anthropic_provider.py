@@ -175,6 +175,9 @@ class AnthropicProvider(LLMProvider):
             supports_cache_control=True,
         )
 
+    def supports_temperature(self) -> bool:
+        return "opus-4-7" not in self.model.lower()
+
     def _fetch_models_live(self) -> list[ModelInfo]:
         """Fetch models from the Anthropic API."""
         client = self._get_client()
@@ -185,8 +188,9 @@ class AnthropicProvider(LLMProvider):
             display_name = getattr(m, "display_name", model_id)
             # API doesn't return context/output limits; use known defaults
             is_opus = "opus" in model_id
-            ctx_window = 200000
-            max_output = 16384 if is_opus else 8192
+            is_opus_47 = "opus-4-7" in model_id
+            ctx_window = 1000000 if is_opus_47 else 200000
+            max_output = 128000 if is_opus_47 else (16384 if is_opus else 8192)
             models.append(
                 ModelInfo(
                     id=model_id,
@@ -196,6 +200,7 @@ class AnthropicProvider(LLMProvider):
                     max_output_tokens=max_output,
                     supports_tools=True,
                     supports_vision=True,
+                    supports_temperature=not is_opus_47,
                 )
             )
         # Sort: newest/best first
@@ -205,6 +210,16 @@ class AnthropicProvider(LLMProvider):
     @staticmethod
     def _builtin_models() -> list[ModelInfo]:
         return [
+            ModelInfo(
+                "claude-opus-4-7",
+                "Claude Opus 4.7",
+                "anthropic",
+                1000000,
+                128000,
+                True,
+                True,
+                False,
+            ),
             ModelInfo(
                 "claude-sonnet-4-6",
                 "Claude Sonnet 4.6",
@@ -387,8 +402,9 @@ class AnthropicProvider(LLMProvider):
             "model": self.model,
             "messages": formatted_messages,
             "max_tokens": max_tokens,
-            "temperature": temperature,
         }
+        if self.supports_temperature():
+            kwargs["temperature"] = temperature
 
         # System prompt with cache_control for prompt caching
         if system:

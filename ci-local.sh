@@ -29,13 +29,14 @@ HAVE_PYTEST=false
 HAVE_DESLOPPIFY=false
 
 if command -v uv &>/dev/null; then
-    PYTHON_RUN=(uv run --with ruff --with mypy --with pytest --with desloppify python)
-    DESLOPPY_CMD=(uv run --with ruff --with mypy --with pytest --with desloppify desloppify)
+    PYTHON_RUN=(uv run --locked --group dev python)
+    DESLOPPY_CMD=(uv run --locked --group dev desloppify)
 else
     NEED=()
-    python3 -m ruff --version &>/dev/null || NEED+=(ruff)
-    python3 -m mypy --version &>/dev/null || NEED+=(mypy)
-    python3 -m pytest --version &>/dev/null || NEED+=(pytest)
+    python3 -m ruff --version &>/dev/null || NEED+=(ruff==0.15.13)
+    python3 -m mypy --version &>/dev/null || NEED+=(mypy==2.1.0)
+    python3 -m pytest --version &>/dev/null || NEED+=(pytest==9.0.3)
+    command -v desloppify &>/dev/null || NEED+=(desloppify==0.9.3)
     if [[ ${#NEED[@]} -gt 0 ]]; then
         echo "  Installing missing tools: ${NEED[*]}"
         pip3 install --quiet --break-system-packages "${NEED[@]}"
