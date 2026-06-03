@@ -21,6 +21,7 @@ class TurnResult:
     text: str = ""
     tool_calls: list = field(default_factory=list)
     usage: TokenUsage | None = None
+    finish_reason: str | None = None
     cancelled: bool = False
     error: str | None = None
 
@@ -51,6 +52,24 @@ def build_assistant_message(
     return msg
 
 
+def finish_reason_notice(finish_reason: str | None) -> str:
+    """Return a user-facing notice for non-final provider stop reasons."""
+    if not finish_reason:
+        return ""
+    normalized = finish_reason.lower()
+    normal_reasons = {"stop", "end_turn", "tool_calls", "completed", "complete", "success"}
+    if normalized in normal_reasons:
+        return ""
+    if normalized in {"length", "max_tokens", "max_output_tokens", "output_limit"}:
+        return (
+            "Model output stopped because the provider hit its output token limit. "
+            "The answer may be incomplete; ask Rikugan to continue from the last point."
+        )
+    if normalized in {"content_filter", "safety", "blocked"}:
+        return f"Model output stopped early because the provider returned finish_reason={finish_reason!r}."
+    return f"Model output stopped with provider finish_reason={finish_reason!r}."
+
+
 def execute_single_turn(
     loop: AgentLoop,
     system_prompt: str,
@@ -68,6 +87,7 @@ def execute_single_turn(
             tool_calls,
             last_usage,
             raw_parts,
+            finish_reason,
         ) = yield from loop._stream_llm_turn(system_prompt, tools_schema)
     except ProviderError as e:
         msg = loop._format_provider_error_for_user(e)
@@ -76,6 +96,9 @@ def execute_single_turn(
 
     if assistant_text:
         yield TurnEvent.text_done(assistant_text)
+    notice = finish_reason_notice(finish_reason)
+    if notice:
+        yield TurnEvent.error_event(notice)
 
     assistant_msg = build_assistant_message(
         assistant_text,
@@ -86,7 +109,7 @@ def execute_single_turn(
     loop.session.add_message(assistant_msg)
 
     if not tool_calls:
-        return TurnResult(text=assistant_text, usage=last_usage)
+        return TurnResult(text=assistant_text, usage=last_usage, finish_reason=finish_reason)
 
     # Execute tools and store results
     tool_results: list[ToolResult] = yield from loop._execute_tool_calls(tool_calls)
@@ -96,4 +119,5 @@ def execute_single_turn(
         text=assistant_text,
         tool_calls=tool_calls,
         usage=last_usage,
+        finish_reason=finish_reason,
     )

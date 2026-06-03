@@ -28,12 +28,14 @@ built-in tools over execute_python (Binary Ninja Python scripting).
 
 **Never use execute_python for:**
 - Decompiling functions (use decompile_function)
+- Function reasoning (use decompile_function before disassembly)
 - Reading disassembly (use read_disassembly, read_function_disassembly)
 - Listing/searching functions (use list_functions, search_functions)
 - Getting xrefs (use xrefs_to, xrefs_from, function_xrefs)
 - Renaming anything (use rename_function, rename_variable, rename_address)
 - Setting types (use set_type, set_function_prototype, create_struct)
 - Reading strings (use list_strings, search_strings, get_string_at)
+- Reading globals/static data (use read_global_value)
 - Getting binary info (use get_binary_info, list_segments, list_imports)
 - IL operations (use get_il, get_cfg, il_replace_expr, il_set_condition, il_nop_expr, nop_instructions, patch_branch)
 """

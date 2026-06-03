@@ -6,6 +6,7 @@ import importlib
 from typing import Annotated
 
 from ...tools.base import parse_addr, tool
+from ...tools.pagination import format_page, normalize_page
 
 ida_funcs = idautils = idc = None  # populated below when IDA is available
 try:
@@ -19,13 +20,17 @@ except ImportError:
 @tool(category="disassembly")
 def read_disassembly(
     address: Annotated[str, "Start address (hex string)"],
-    count: Annotated[int, "Number of instructions to disassemble"] = 30,
+    offset: Annotated[int, "Instruction offset from the start address"] = 0,
+    limit: Annotated[int, "Max instructions to return"] = 30,
+    count: Annotated[int, "Deprecated: use limit instead"] = 0,
 ) -> str:
-    """Read disassembly listing starting at the given address."""
+    """Read paginated disassembly starting at the given address."""
 
     ea = parse_addr(address)
+    offset, limit = normalize_page(offset, count or limit)
     lines = []
-    for _ in range(count):
+    current_index = 0
+    while len(lines) < limit:
         mnem = idc.print_insn_mnem(ea)
         if not mnem:
             break
@@ -45,25 +50,32 @@ def read_disassembly(
         elif rep_comment:
             cmt = f"  ; {rep_comment}"
 
-        lines.append(f"  0x{ea:08x}  {mnem:8s} {ops}{cmt}")
+        if current_index >= offset:
+            lines.append(f"  0x{ea:08x}  {mnem:8s} {ops}{cmt}")
+        current_index += 1
         ea = idc.next_head(ea, ea + 0x1000)
         if ea == idc.BADADDR:
             break
-    return "\n".join(lines)
+    header = f"Disassembly from 0x{parse_addr(address):x} instructions {offset}-{offset + len(lines)}:"
+    if ea != idc.BADADDR:
+        lines.append(f"  ... continue with offset={offset + len(lines)} limit={limit}.")
+    return "\n".join([header, *(lines or ["  (none)"])])
 
 
 @tool(category="disassembly")
 def read_function_disassembly(
     address: Annotated[str, "Function address (hex string)"],
+    offset: Annotated[int, "Start instruction index for pagination"] = 0,
+    limit: Annotated[int, "Max instructions to return"] = 120,
 ) -> str:
-    """Read the full disassembly of a function."""
+    """Read paginated disassembly of a function."""
 
     ea = parse_addr(address)
     func = ida_funcs.get_func(ea)
     if func is None:
         return f"No function at 0x{ea:x}"
 
-    lines = [f"; Function at 0x{func.start_ea:x}"]
+    rows = []
     for head in idautils.FuncItems(func.start_ea):
         mnem = idc.print_insn_mnem(head)
         if not mnem:
@@ -78,9 +90,17 @@ def read_function_disassembly(
 
         comment = idc.get_cmt(head, 0) or idc.get_cmt(head, 1) or ""
         cmt = f"  ; {comment}" if comment else ""
-        lines.append(f"  0x{head:08x}  {mnem:8s} {ops}{cmt}")
+        rows.append(f"  0x{head:08x}  {mnem:8s} {ops}{cmt}")
 
-    return "\n".join(lines)
+    page_offset, page_limit = normalize_page(offset, limit)
+    next_offset = min(len(rows), page_offset + page_limit)
+    return format_page(
+        rows,
+        offset=offset,
+        limit=limit,
+        title=f"Disassembly for function 0x{func.start_ea:x}",
+        next_hint=f"Call read_function_disassembly with offset={next_offset} limit={page_limit}.",
+    )
 
 
 @tool(category="disassembly")

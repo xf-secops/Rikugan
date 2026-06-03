@@ -66,6 +66,13 @@ ANALYSIS_SECTION = """\
 ## Analysis Approach
 - Look before you guess -- if unsure what a function does, decompile it.
   If unsure where something is called, check xrefs.
+- Prefer `decompile_function` for function-level reasoning. Use
+  `read_disassembly` / `read_function_disassembly` only for instruction-level
+  questions, patch verification, obfuscation triage, or when decompilation
+  fails.
+- Use `read_global_value` for globals, pointers, scalar constants, string data,
+  vtables, arrays, and other static data. Do not rely on raw `read_bytes`
+  output unless the user explicitly asks for bytes or the value is unknown.
 - Use xref tools BEFORE decompiling for exploration. Xrefs are cheap;
   decompiling is expensive. Map the call graph first, then decompile
   the interesting nodes.
@@ -119,7 +126,12 @@ Prefer precise search and filter tools over listing everything:
 - Use search_strings over list_strings when looking for specific content
 - Use search_functions over list_functions when looking for specific names
 - Use targeted xref queries rather than dumping all references
-- When paginating results, stop once you find what you need
+- Tools that return long output expose `offset` and `limit` parameters. Page
+  forward deliberately instead of accepting truncated output as complete.
+- If a tool result says it was truncated by a safety cap, immediately retry
+  with narrower search terms or the next `offset`/smaller `limit`; do not
+  reason as if the truncated result is complete.
+- When paginating results, stop once you find what you need.
 - Avoid reading entire sections when a search can narrow results first
 """
 
@@ -188,6 +200,7 @@ nobody asked you to.
 # Capability bullet lines shared by both IDA and Binary Ninja prompts.
 SHARED_CAPABILITIES_BULLETS = """\
 - Read disassembly and decompiled pseudocode
+- Read and interpret global/static data values
 - Navigate to addresses and functions
 - Search for functions, strings, and cross-references
 - Rename functions, variables, and addresses

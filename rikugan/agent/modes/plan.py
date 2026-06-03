@@ -13,7 +13,7 @@ from ...core.sanitize import sanitize_skill_body
 from ...core.types import Message, Role, UserDecision, parse_approval
 from ..plan_mode import parse_plan as _parse_plan_impl
 from ..turn import TurnEvent
-from .turn_helpers import execute_single_turn
+from .turn_helpers import execute_single_turn, finish_reason_notice
 
 if TYPE_CHECKING:
     from ..loop import AgentLoop
@@ -58,13 +58,16 @@ def _generate_plan_text(
     """Stream a text-only LLM turn for plan generation. Returns plan text or None."""
     yield TurnEvent.turn_start(1)
     try:
-        plan_text, _, usage, _ = yield from loop._stream_llm_turn(system_prompt, None)
+        plan_text, _, usage, _, finish_reason = yield from loop._stream_llm_turn(system_prompt, None)
     except ProviderError as e:
         yield TurnEvent.error_event(loop._format_provider_error_for_user(e))
         return None
 
     if plan_text:
         yield TurnEvent.text_done(plan_text)
+    notice = finish_reason_notice(finish_reason)
+    if notice:
+        yield TurnEvent.error_event(notice)
     loop.session.add_message(Message(role=Role.ASSISTANT, content=plan_text, token_usage=usage))
     yield TurnEvent.turn_end(1)
     return plan_text

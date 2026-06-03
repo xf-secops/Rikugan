@@ -6,6 +6,7 @@ from typing import Annotated
 
 from ...core.logging import log_debug
 from ...tools.base import tool
+from ...tools.pagination import format_page, normalize_page
 from .compat import parse_addr_like, require_bv
 from .fn_utils import get_function_at
 
@@ -41,8 +42,13 @@ def _render_hlil(hlil, with_line_numbers: bool = False) -> str:
 
 
 @tool(category="decompiler", requires_decompiler=True)
-def decompile_function(address: Annotated[str, "Function address (hex string)"]) -> str:
-    """Decompile the function at the given address and return pseudocode."""
+def decompile_function(
+    address: Annotated[str, "Function address (hex string)"],
+    offset: Annotated[int, "Start pseudocode line for pagination"] = 0,
+    limit: Annotated[int, "Max pseudocode lines to return"] = 160,
+    with_line_numbers: Annotated[bool, "Include pseudocode line numbers"] = True,
+) -> str:
+    """Decompile the function at the given address and return paginated pseudocode."""
     bv = require_bv()
     ea = parse_addr_like(address)
     func = get_function_at(bv, ea)
@@ -52,16 +58,25 @@ def decompile_function(address: Annotated[str, "Function address (hex string)"])
     hlil = _get_hlil(func)
     if hlil is None:
         return f"HLIL not available for function at 0x{int(getattr(func, 'start', ea)):x}"
-    text = _render_hlil(hlil, with_line_numbers=False)
-    return text or "(no pseudocode)"
+    text = _render_hlil(hlil, with_line_numbers=bool(with_line_numbers))
+    rows = text.splitlines() if text else []
+    page_offset, page_limit = normalize_page(offset, limit)
+    next_offset = min(len(rows), page_offset + page_limit)
+    return format_page(
+        rows,
+        offset=offset,
+        limit=limit,
+        title=f"Pseudocode for 0x{int(getattr(func, 'start', ea)):x}",
+        empty="  (no pseudocode)",
+        next_hint=f"Call decompile_function with offset={next_offset} limit={page_limit}.",
+    )
 
 
-@tool(category="decompiler", requires_decompiler=True)
 def get_pseudocode(
     address: Annotated[str, "Function address (hex string)"],
     with_line_numbers: Annotated[bool, "Include line numbers"] = True,
 ) -> str:
-    """Get HLIL pseudocode with optional line numbers."""
+    """Compatibility helper: get HLIL text without registering a second tool."""
     bv = require_bv()
     ea = parse_addr_like(address)
     func = get_function_at(bv, ea)

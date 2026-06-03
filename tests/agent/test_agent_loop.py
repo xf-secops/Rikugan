@@ -97,6 +97,11 @@ def _text_response_no_usage(text: str) -> List[StreamChunk]:
     return [StreamChunk(text=text)]
 
 
+def _text_response_with_finish_reason(text: str, finish_reason: str) -> List[StreamChunk]:
+    """Create a text response that ends with an explicit provider finish reason."""
+    return [StreamChunk(text=text), StreamChunk(finish_reason=finish_reason)]
+
+
 def _tool_call_response(tool_name: str, args: Dict[str, Any], call_id: str = "call_1") -> List[StreamChunk]:
     """Create a response with a tool call."""
     return [
@@ -273,6 +278,16 @@ class TestAgentLoop(unittest.TestCase):
         self.assertGreater(len(usage_events), 0)
         self.assertGreater(session.last_prompt_tokens, 0)
         self.assertGreater(session.total_usage.total_tokens, 0)
+
+    def test_output_limit_finish_reason_is_visible(self):
+        provider = MockProvider(responses=[_text_response_with_finish_reason("Partial", "max_tokens")])
+        loop = self._make_loop(provider)
+
+        events = list(loop.run("Long answer please"))
+        warnings = [e for e in events if e.type == TurnEventType.ERROR]
+
+        self.assertTrue(warnings)
+        self.assertIn("output token limit", warnings[0].error)
 
     def test_execute_python_requires_approval_even_in_explore_only(self):
         provider = MockProvider()

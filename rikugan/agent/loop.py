@@ -738,10 +738,10 @@ class AgentLoop:
         system_prompt: str,
         tools_schema: list | None,
         max_retries: int = 0,
-    ) -> Generator[TurnEvent, None, tuple[str, list[ToolCall], TokenUsage | None, Any]]:
+    ) -> Generator[TurnEvent, None, tuple[str, list[ToolCall], TokenUsage | None, Any, str | None]]:
         """Stream one LLM call, yielding events. Retries on transient errors.
 
-        Returns ``(text, tool_calls, usage, raw_parts)`` where *raw_parts* is
+        Returns ``(text, tool_calls, usage, raw_parts, finish_reason)`` where *raw_parts* is
         provider-specific opaque data (e.g. Gemini parts with thought_signatures)
         that should be stored on the :class:`Message` for faithful history replay.
 
@@ -918,7 +918,7 @@ class AgentLoop:
         self,
         system_prompt: str,
         tools_schema: list | None,
-    ) -> Generator[TurnEvent, None, tuple[str, list[ToolCall], TokenUsage | None, Any]]:
+    ) -> Generator[TurnEvent, None, tuple[str, list[ToolCall], TokenUsage | None, Any, str | None]]:
         """Stream one LLM call, yielding events (no retry logic)."""
         assistant_text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
@@ -926,6 +926,7 @@ class AgentLoop:
         current_tool_names: dict[str, str] = {}
         last_usage: TokenUsage | None = None
         raw_parts: Any = None
+        finish_reason: str | None = None
 
         provider_messages, estimated_prompt_tokens, estimated_usage = self._prepare_provider_messages(system_prompt)
         # Do not emit a pre-stream estimate — it causes the display to jump
@@ -980,6 +981,9 @@ class AgentLoop:
             if chunk.raw_parts is not None:
                 raw_parts = chunk.raw_parts
 
+            if chunk.finish_reason:
+                finish_reason = chunk.finish_reason
+
         last_usage, need_usage_update = self._finalize_stream_usage(
             last_usage, estimated_usage, estimated_prompt_tokens
         )
@@ -989,8 +993,11 @@ class AgentLoop:
             yield TurnEvent.usage_update(last_usage)
 
         assistant_text = "".join(assistant_text_parts)
-        log_debug(f"Stream done: {chunk_count} chunks, {len(assistant_text)} chars, {len(tool_calls)} tool calls")
-        return (assistant_text, tool_calls, last_usage, raw_parts)
+        log_debug(
+            f"Stream done: {chunk_count} chunks, {len(assistant_text)} chars, "
+            f"{len(tool_calls)} tool calls, finish_reason={finish_reason}"
+        )
+        return (assistant_text, tool_calls, last_usage, raw_parts, finish_reason)
 
     @staticmethod
     def _estimate_prompt_tokens(provider_messages: list[Message], system_prompt: str) -> int:

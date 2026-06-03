@@ -9,6 +9,7 @@ from ...core.errors import ToolError
 from ...core.host import HAS_HEXRAYS as _HAS_HEXRAYS
 from ...core.logging import log_debug
 from ...tools.base import parse_addr, tool
+from ...tools.pagination import format_page, normalize_page
 
 ida_hexrays = ida_lines = ida_funcs = ida_idaapi = None
 try:
@@ -36,31 +37,51 @@ def _decompile(ea: int):
 
 
 @tool(category="decompiler", requires_decompiler=True)
-def decompile_function(address: Annotated[str, "Function address (hex string)"]) -> str:
-    """Decompile the function at the given address and return pseudocode."""
-    result = _decompile(parse_addr(address))
-    return result if isinstance(result, str) else str(result)
-
-
-@tool(category="decompiler", requires_decompiler=True)
-def get_pseudocode(
+def decompile_function(
     address: Annotated[str, "Function address (hex string)"],
-    with_line_numbers: Annotated[bool, "Include line numbers"] = True,
+    offset: Annotated[int, "Start pseudocode line for pagination"] = 0,
+    limit: Annotated[int, "Max pseudocode lines to return"] = 160,
+    with_line_numbers: Annotated[bool, "Include pseudocode line numbers"] = True,
 ) -> str:
-    """Get the pseudocode of a function with optional line numbers."""
+    """Decompile the function at the given address and return paginated pseudocode."""
     result = _decompile(parse_addr(address))
     if isinstance(result, str):
         return result
 
+    rows = _render_pseudocode_lines(result, with_line_numbers=bool(with_line_numbers))
+    page_offset, page_limit = normalize_page(offset, limit)
+    next_offset = min(len(rows), page_offset + page_limit)
+    return format_page(
+        rows,
+        offset=offset,
+        limit=limit,
+        title=f"Pseudocode for 0x{parse_addr(address):x}",
+        next_hint=f"Call decompile_function with offset={next_offset} limit={page_limit}.",
+    )
+
+
+def _render_pseudocode_lines(cfunc, with_line_numbers: bool = True) -> list[str]:
     lines = []
-    sv = result.get_pseudocode()
+    sv = cfunc.get_pseudocode()
     for i, sl in enumerate(sv):
         text = ida_lines.tag_remove(sl.line)
         if with_line_numbers:
             lines.append(f"{i + 1:4d}  {text}")
         else:
             lines.append(text)
-    return "\n".join(lines)
+    return lines
+
+
+def get_pseudocode(
+    address: Annotated[str, "Function address (hex string)"],
+    with_line_numbers: Annotated[bool, "Include line numbers"] = True,
+) -> str:
+    """Compatibility helper: get pseudocode text without registering a second tool."""
+    result = _decompile(parse_addr(address))
+    if isinstance(result, str):
+        return result
+
+    return "\n".join(_render_pseudocode_lines(result, with_line_numbers=bool(with_line_numbers)))
 
 
 @tool(category="decompiler", requires_decompiler=True)
