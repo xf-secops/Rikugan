@@ -41,7 +41,7 @@ def read_disassembly(
     bv = require_bv()
     ea = parse_addr_like(address)
     offset, limit = normalize_page(offset, count or limit)
-    lines = []
+    lines: list[str] = []
     current_index = 0
     while len(lines) < limit:
         line = _format_line(bv, ea)
