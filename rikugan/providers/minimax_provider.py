@@ -82,6 +82,22 @@ class MiniMaxProvider(AnthropicProvider):
     def _builtin_models() -> list[ModelInfo]:
         return [
             ModelInfo(
+                id="MiniMax-M2.7",
+                name="MiniMax M2.7",
+                provider="minimax",
+                context_window=204800,
+                max_output_tokens=8192,
+                supports_tools=True,
+            ),
+            ModelInfo(
+                id="MiniMax-M2.7-highspeed",
+                name="MiniMax M2.7 Highspeed",
+                provider="minimax",
+                context_window=204800,
+                max_output_tokens=8192,
+                supports_tools=True,
+            ),
+            ModelInfo(
                 id="MiniMax-M2.5",
                 name="MiniMax M2.5",
                 provider="minimax",

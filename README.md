@@ -22,6 +22,8 @@ curl -fsSL https://raw.githubusercontent.com/buzzer-re/Rikugan/main/install.sh |
 irm https://raw.githubusercontent.com/buzzer-re/Rikugan/main/install.ps1 | iex
 ```
 
+***Windows users should also install the latest [Microsoft Visual C++ Redistributable 2015-2022 x64](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version) before launching IDA. Rikugan uses IDA's bundled PySide6/Shiboken Qt bindings, and an outdated VC++ Runtime can cause it to crash during startup.***
+
 For host-specific install, manual setup, and configuration, see the [docs](https://rikugan.reversing.codes/docs.html).
 
 ## Is this another MCP client?
@@ -88,6 +90,7 @@ Also supports any OpenAI-compatible endpoint and Ollama for local models.
 - Python 3.10+
 - At least one LLM provider
 - Windows, macOS, or Linux
+- Windows: latest [Microsoft Visual C++ Redistributable 2015-2022 x64](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version)
 
 > **IDA Pro + Python >= 3.14:** Shiboken has a known UAF bug. Rikugan includes a workaround, but Python 3.10 is still the safest choice. See the [upstream report](https://community.hex-rays.com/t/ida-9-3-b1-macos-arm64-uaf-crash/646).
 
