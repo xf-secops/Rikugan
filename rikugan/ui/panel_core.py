@@ -301,9 +301,7 @@ class ChatThreadRow(QWidget):
         if badge:
             key = badge.split()[0].capitalize()
             css = _BADGE_CSS.get(key, "")
-            self._badge.setStyleSheet(
-                f"QLabel {{ {css} border-radius: 3px; padding: 1px 5px; font-size: 10px; }}"
-            )
+            self._badge.setStyleSheet(f"QLabel {{ {css} border-radius: 3px; padding: 1px 5px; font-size: 10px; }}")
 
 
 class ChatThreadList(QWidget):
