@@ -259,7 +259,9 @@ class OpenAIProvider(LLMProvider):
                             if idx not in current_tool_calls:
                                 current_tool_calls[idx] = {
                                     "id": tc_delta.id or "",
-                                    "name": tc_delta.function.name if tc_delta.function and tc_delta.function.name else "",
+                                    "name": tc_delta.function.name
+                                    if tc_delta.function and tc_delta.function.name
+                                    else "",
                                     "args": "",
                                 }
                                 if tc_delta.id:
