@@ -115,6 +115,7 @@ def ensure_pyside6_stubs() -> None:
             QEvent=_qt_class("QEvent"),
             Qt=_sentinel,
             QObject=_qt_class("QObject"),
+            QSize=_qt_class("QSize"),
             QTimer=_qt_class("QTimer"),
         ),
     )

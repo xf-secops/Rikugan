@@ -29,6 +29,7 @@ from .qt_compat import (
     QVBoxLayout,
     QWidget,
 )
+from .styles import build_chat_view_stylesheet
 from .tool_widgets import ToolApprovalWidget, ToolCallWidget, ToolGroupWidget
 
 _THINKING_MIN_DISPLAY_MS = 500
@@ -52,6 +53,7 @@ class ChatView(QScrollArea):
     def __init__(self, parent: QWidget = None):
         super().__init__(parent)
         self.setObjectName("chat_scroll")
+        self.setStyleSheet(build_chat_view_stylesheet(self))
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 

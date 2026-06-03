@@ -54,11 +54,16 @@ def _normalize_ida_palette(colors: dict[str, str]) -> dict[str, str]:
     window = colors["window"]
     window_text = colors["window_text"]
     is_dark = _hex_luminance(window) < 0.5
+    if is_dark and _hex_luminance(window_text) < 0.55:
+        window_text = _FALLBACK_COLORS["window_text"]
+    elif not is_dark and _hex_luminance(window_text) > 0.55:
+        window_text = "#1f1f1f"
     toward = "#ffffff" if is_dark else "#000000"
     surface = blend_theme_color(window, toward, 0.08 if is_dark else 0.035)
     alt_surface = blend_theme_color(window, toward, 0.14 if is_dark else 0.07)
     mid = blend_theme_color(window, toward, 0.22 if is_dark else 0.16)
     colors = dict(colors)
+    colors["window_text"] = window_text
     colors["base"] = surface
     colors["button"] = surface
     colors["alt_base"] = alt_surface
@@ -68,6 +73,23 @@ def _normalize_ida_palette(colors: dict[str, str]) -> dict[str, str]:
     colors["dark"] = blend_theme_color(window, "#000000", 0.20 if is_dark else 0.08)
     colors["light"] = blend_theme_color(window, "#ffffff", 0.14 if is_dark else 0.20)
     return colors
+
+
+def _palette_colors(palette, qpalette) -> dict[str, str]:
+    return {
+        "window": palette.color(_palette_role(qpalette, "Window")).name(),
+        "window_text": palette.color(_palette_role(qpalette, "WindowText")).name(),
+        "base": palette.color(_palette_role(qpalette, "Base")).name(),
+        "alt_base": palette.color(_palette_role(qpalette, "AlternateBase")).name(),
+        "text": palette.color(_palette_role(qpalette, "Text")).name(),
+        "button": palette.color(_palette_role(qpalette, "Button")).name(),
+        "button_text": palette.color(_palette_role(qpalette, "ButtonText")).name(),
+        "highlight": palette.color(_palette_role(qpalette, "Highlight")).name(),
+        "highlight_text": palette.color(_palette_role(qpalette, "HighlightedText")).name(),
+        "mid": palette.color(_palette_role(qpalette, "Mid")).name(),
+        "dark": palette.color(_palette_role(qpalette, "Dark")).name(),
+        "light": palette.color(_palette_role(qpalette, "Light")).name(),
+    }
 
 
 def _palette_role(qpalette, role_name: str):
@@ -98,25 +120,52 @@ def get_host_palette_colors(source=None) -> dict[str, str]:
             if app is None or not hasattr(app, "palette"):
                 return dict(_FALLBACK_COLORS)
             palette = app.palette()
-        colors = {
-            "window": palette.color(_palette_role(QPalette, "Window")).name(),
-            "window_text": palette.color(_palette_role(QPalette, "WindowText")).name(),
-            "base": palette.color(_palette_role(QPalette, "Base")).name(),
-            "alt_base": palette.color(_palette_role(QPalette, "AlternateBase")).name(),
-            "text": palette.color(_palette_role(QPalette, "Text")).name(),
-            "button": palette.color(_palette_role(QPalette, "Button")).name(),
-            "button_text": palette.color(_palette_role(QPalette, "ButtonText")).name(),
-            "highlight": palette.color(_palette_role(QPalette, "Highlight")).name(),
-            "highlight_text": palette.color(_palette_role(QPalette, "HighlightedText")).name(),
-            "mid": palette.color(_palette_role(QPalette, "Mid")).name(),
-            "dark": palette.color(_palette_role(QPalette, "Dark")).name(),
-            "light": palette.color(_palette_role(QPalette, "Light")).name(),
-        }
+        colors = _palette_colors(palette, QPalette)
         if use_native_host_theme():
             colors = _normalize_ida_palette(colors)
         return colors
     except Exception:
         return dict(_FALLBACK_COLORS)
+
+
+def get_chat_color_tokens(source=None) -> dict[str, str]:
+    """Return semantic colors for chat surfaces derived from the host Window role."""
+    if isinstance(source, dict):
+        if "chat_canvas" in source:
+            return source
+        colors = _normalize_ida_palette(source)
+    else:
+        colors = get_host_palette_colors(source)
+    panel = colors["window"]
+    text = colors["window_text"]
+    is_dark = _hex_luminance(panel) < 0.5
+    toward = "#ffffff" if is_dark else "#000000"
+
+    chat_canvas = blend_theme_color(panel, toward, 0.04 if is_dark else 0.018)
+    assistant_bg = blend_theme_color(chat_canvas, toward, 0.08 if is_dark else 0.035)
+    tool_bg = blend_theme_color(chat_canvas, toward, 0.06 if is_dark else 0.028)
+    thinking_bg = blend_theme_color(chat_canvas, toward, 0.10 if is_dark else 0.05)
+    input_bg = blend_theme_color(chat_canvas, toward, 0.12 if is_dark else 0.045)
+    border = blend_theme_color(colors["mid"], panel, 0.35)
+    muted = blend_theme_color(text, panel, 0.45)
+    subtle = blend_theme_color(text, panel, 0.30)
+    code_bg = blend_theme_color(assistant_bg, toward, 0.08 if is_dark else 0.04)
+
+    return {
+        "panel": panel,
+        "chat_canvas": chat_canvas,
+        "assistant_bg": assistant_bg,
+        "tool_bg": tool_bg,
+        "thinking_bg": thinking_bg,
+        "input_bg": input_bg,
+        "text": text,
+        "muted": muted,
+        "subtle": subtle,
+        "border": border,
+        "accent": colors["highlight"],
+        "accent_text": colors["highlight_text"],
+        "code_bg": code_bg,
+    }
 
 
 def use_native_host_theme() -> bool:
@@ -148,8 +197,6 @@ def build_theme_stylesheet(source=None) -> str:
 
 def build_small_button_stylesheet(source=None, danger: bool = False) -> str:
     """Return a palette-aware small button stylesheet for host UIs."""
-    if use_native_host_theme():
-        return ""
     colors = get_host_palette_colors(source)
     bg = colors["button"]
     fg = colors["button_text"]
@@ -169,22 +216,84 @@ def build_small_button_stylesheet(source=None, danger: bool = False) -> str:
     )
 
 
+def build_mini_tool_button_stylesheet(source=None, danger: bool = False) -> str:
+    """Return a compact palette-aware QToolButton stylesheet."""
+    colors = get_host_palette_colors(source)
+    bg = blend_theme_color(colors["button"], colors["window"], 0.2)
+    fg = colors["button_text"]
+    border = blend_theme_color(colors["mid"], colors["window"], 0.3)
+    hover = blend_theme_color(bg, colors["light"], 0.14)
+    pressed = blend_theme_color(bg, colors["dark"], 0.14)
+    if danger:
+        fg = "#f87171"
+        border = blend_theme_color("#f44747", colors["window"], 0.2)
+    return (
+        f"QToolButton {{ background-color: {bg}; color: {fg}; border: 1px solid {border}; "
+        "border-radius: 3px; padding: 2px 6px; font-size: 11px; }}"
+        f"QToolButton:hover {{ background-color: {hover}; }}"
+        f"QToolButton:pressed {{ background-color: {pressed}; }}"
+        f"QToolButton:disabled {{ color: {blend_theme_color(fg, colors['window'], 0.45)}; "
+        f"border-color: {blend_theme_color(border, colors['window'], 0.35)}; }}"
+    )
+
+
+def build_chat_sidebar_stylesheet(source=None) -> str:
+    """Return palette-aware stylesheet for the chat session sidebar."""
+    colors = get_host_palette_colors(source)
+    surface = blend_theme_color(colors["window"], colors["button"], 0.16)
+    input_bg = blend_theme_color(colors["base"], colors["window"], 0.18)
+    border = blend_theme_color(colors["mid"], colors["window"], 0.35)
+    hover = blend_theme_color(colors["highlight"], colors["window"], 0.82)
+    selected = blend_theme_color(colors["highlight"], colors["window"], 0.68)
+    text = colors["window_text"]
+    muted = blend_theme_color(text, colors["window"], 0.45)
+    css = (
+        f"QWidget#chat_sidebar {{ background-color: {surface}; color: {text}; }}"
+        f"QLabel#chat_sidebar_title {{ color: {text}; font-weight: bold; font-size: 12px; }}"
+        f"QLabel#chat_row_title {{ color: {text}; font-weight: bold; font-size: 12px; background: transparent; }}"
+        f"QLabel#chat_row_detail {{ color: {muted}; font-size: 11px; background: transparent; }}"
+        f"QLineEdit#chat_search {{ background-color: {input_bg}; color: {text}; border: 1px solid {border}; "
+        "border-radius: 3px; padding: 4px 6px; }}"
+        f"QListWidget#chat_thread_list {{ border: none; background-color: {surface}; outline: none; }}"
+        "QListWidget#chat_thread_list::item { border: none; padding: 0px; }"
+        f"QListWidget#chat_thread_list::item:hover {{ background-color: {hover}; }}"
+        f"QListWidget#chat_thread_list::item:selected {{ background-color: {selected}; }}"
+    )
+    # In IDA let the dock's native Qt theme color all containers; only
+    # Binary Ninja / standalone mode needs explicit palette-derived colors.
+    return maybe_host_stylesheet(css)
+
+
+def build_chat_view_stylesheet(source=None) -> str:
+    """Return palette-aware stylesheet for the scrollable chat viewport."""
+    tokens = get_chat_color_tokens(source)
+    canvas = tokens["chat_canvas"]
+    if use_native_host_theme():
+        # IDA applies its dock theme natively; any explicit background-color
+        # here overrides IDA's own colors and looks wrong. The one exception is
+        # the QScrollArea viewport (unnamed direct QWidget child) which defaults
+        # to Base=white in IDA. Making it transparent lets the dock background
+        # show instead, matching the rest of the panel.
+        return "QScrollArea#chat_scroll > QWidget { background: transparent; }"
+    return (
+        f"QScrollArea#chat_scroll {{ border: none; background-color: {canvas}; }}"
+        f"QScrollArea#chat_scroll > QWidget {{ background-color: {canvas}; }}"
+        f"QWidget#chat_container {{ background-color: {canvas}; color: {tokens['text']}; }}"
+    )
+
+
 def build_input_area_stylesheet(source=None) -> str:
     """Return a palette-aware input editor stylesheet."""
-    if use_native_host_theme():
-        return ""
-    colors = get_host_palette_colors(source)
-    bg = blend_theme_color(colors["window"], colors["button"], 0.22)
-    text = colors["window_text"]
-    border = blend_theme_color(colors["mid"], colors["window"], 0.35)
+    tokens = get_chat_color_tokens(source)
     return (
         "QPlainTextEdit#input_area { "
-        f"background-color: {bg}; color: {text}; "
-        f"border: 1px solid {border}; border-radius: 8px; "
+        f"background-color: {tokens['input_bg']}; color: {tokens['text']}; "
+        f"border: 1px solid {tokens['border']}; border-radius: 8px; "
         "padding: 8px; font-size: 13px; "
-        f"selection-background-color: {colors['highlight']}; "
-        f"selection-color: {colors['highlight_text']}; }}"
-        f"QPlainTextEdit#input_area:focus {{ border-color: {colors['highlight']}; }}"
+        f"selection-background-color: {tokens['accent']}; "
+        f"selection-color: {tokens['accent_text']}; }}"
+        f"QPlainTextEdit#input_area:disabled {{ color: {tokens['muted']}; }}"
+        f"QPlainTextEdit#input_area:focus {{ border-color: {tokens['accent']}; }}"
     )
 
 

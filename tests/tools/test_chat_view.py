@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import MagicMock
 
 from tests.qt_stubs import ensure_pyside6_stubs
+
 ensure_pyside6_stubs()
 
 # Stub all heavy submodules that chat_view imports.
@@ -21,10 +22,15 @@ for _mod_name in [
     # Add commonly-needed attrs
     for _attr in [
         "PlanView", "TurnEvent",
-        "TurnEventType", "Message", "Role",
+        "TurnEventType", "Message", "Role", "TokenUsage", "ToolResult",
     ]:
         setattr(_stub, _attr, MagicMock())
     sys.modules[_mod_name] = _stub
+
+_state_stub = types.ModuleType("rikugan.state.session")
+_state_stub.INTERNAL_EVENT_CANCELLED = "cancelled"
+_state_stub.INTERNAL_EVENT_KEY = "rikugan_internal"
+sys.modules["rikugan.state.session"] = _state_stub
 
 # Other tests may leave stubbed UI modules behind; force fresh imports.
 for _mod_name in [
@@ -35,9 +41,8 @@ for _mod_name in [
 ]:
     sys.modules.pop(_mod_name, None)
 
-from rikugan.ui.chat_view import _is_hidden_system_user_message, _TOOL_GROUP_MIN_CALLS  # noqa: E402
 from rikugan.ui.bulk_renamer import BulkRenamerWidget  # noqa: E402
-
+from rikugan.ui.chat_view import _TOOL_GROUP_MIN_CALLS, _is_hidden_system_user_message  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # _is_hidden_system_user_message

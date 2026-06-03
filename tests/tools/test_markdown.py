@@ -3,8 +3,47 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
-from rikugan.ui.markdown import _has_markdown_syntax, _inline, _inline_formatting, md_to_html
+from rikugan.ui.markdown import (
+    _has_markdown_syntax,
+    _inline,
+    _inline_formatting,
+    _theme_markdown_styles,
+    md_to_html,
+)
+
+_LIGHT_TOKENS = {
+    "panel": "#f2f2f2",
+    "chat_canvas": "#eeeeee",
+    "assistant_bg": "#e9e9e9",
+    "tool_bg": "#ebebeb",
+    "thinking_bg": "#e6e6e6",
+    "input_bg": "#e4e4e4",
+    "text": "#202020",
+    "muted": "#8a8a8a",
+    "subtle": "#626262",
+    "border": "#b0b0b0",
+    "accent": "#1476a8",
+    "accent_text": "#ffffff",
+    "code_bg": "#e2e2e2",
+}
+
+_DARK_TOKENS = {
+    "panel": "#242424",
+    "chat_canvas": "#2d2d2d",
+    "assistant_bg": "#353535",
+    "tool_bg": "#333333",
+    "thinking_bg": "#393939",
+    "input_bg": "#3c3c3c",
+    "text": "#e6e6e6",
+    "muted": "#888888",
+    "subtle": "#aaaaaa",
+    "border": "#555555",
+    "accent": "#1678aa",
+    "accent_text": "#ffffff",
+    "code_bg": "#3a3a3a",
+}
 
 
 class TestMdToHtmlEmptyAndNone(unittest.TestCase):
@@ -171,6 +210,21 @@ class TestInlineCodeSpans(unittest.TestCase):
         result = _inline("<b>not bold</b>")
         self.assertNotIn("<b>", result)
         self.assertIn("&lt;b&gt;", result)
+
+
+class TestMarkdownThemeStyles(unittest.TestCase):
+    def test_light_theme_code_styles_use_dark_text_on_light_surface(self):
+        with patch("rikugan.ui.markdown.get_chat_color_tokens", return_value=_LIGHT_TOKENS):
+            styles = _theme_markdown_styles()
+        self.assertIn("background-color:#e2e2e2", styles["block_code_style"])
+        self.assertIn("color:#202020", styles["block_code_style"])
+        self.assertIn("color:#1476a8", styles["link_style"])
+
+    def test_dark_theme_code_styles_use_light_text_on_dark_surface(self):
+        with patch("rikugan.ui.markdown.get_chat_color_tokens", return_value=_DARK_TOKENS):
+            styles = _theme_markdown_styles()
+        self.assertIn("background-color:#3a3a3a", styles["block_code_style"])
+        self.assertIn("color:#e6e6e6", styles["block_code_style"])
 
 
 class TestMdToHtmlIntegration(unittest.TestCase):

@@ -60,7 +60,7 @@ QT_BINDING: str = _detect_binding()
 # ---------------------------------------------------------------------------
 
 if QT_BINDING == "PySide6":
-    from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
+    from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
     from PySide6.QtGui import (
         QColor,
         QFont,
@@ -110,7 +110,7 @@ if QT_BINDING == "PySide6":
         QWidget,
     )
 else:
-    from PyQt5.QtCore import QEvent, QObject, Qt, QTimer  # noqa: F401
+    from PyQt5.QtCore import QEvent, QObject, QSize, Qt, QTimer  # noqa: F401
     from PyQt5.QtCore import pyqtSignal as Signal  # noqa: F401
     from PyQt5.QtGui import (  # noqa: F401
         QColor,
