@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from tests.mocks.ida_mock import install_ida_mocks
+
 install_ida_mocks()
 
 # Some UI tests stub modules in sys.modules; ensure this test gets real ones.
@@ -60,11 +61,13 @@ class TestIdaSessionController(unittest.TestCase):
         self.ctrl.queue_message("first")
         self.ctrl.queue_message("second")
 
-        # on_agent_finished discards all pending messages
+        # on_agent_finished returns queued messages one at a time
         next_msg = self.ctrl.on_agent_finished()
-        self.assertIsNone(next_msg)
+        self.assertEqual(next_msg, "first")
 
-        # Subsequent calls also return None (queue was cleared)
+        next_msg = self.ctrl.on_agent_finished()
+        self.assertEqual(next_msg, "second")
+
         next_msg = self.ctrl.on_agent_finished()
         self.assertIsNone(next_msg)
 
@@ -106,6 +109,7 @@ class TestIdaSessionController(unittest.TestCase):
 
         # Verify session was saved to disk
         from rikugan.state.history import SessionHistory
+
         history = SessionHistory(self.cfg)
         sessions = history.list_sessions(db_instance_id=self.ctrl._db_instance_id)
         self.assertTrue(any(s["id"] == self.ctrl.session.id for s in sessions))
@@ -198,7 +202,9 @@ class TestIdaSessionController(unittest.TestCase):
         self.ctrl.shutdown()
 
         with patch.object(self.cfg, "enabled_external_mcp", ["claude:test"]):
-            with patch("rikugan.core.external_sources.discover_all_external_mcp", return_value={"claude": [], "codex": []}) as discover_mcp:
+            with patch(
+                "rikugan.core.external_sources.discover_all_external_mcp", return_value={"claude": [], "codex": []}
+            ) as discover_mcp:
                 ctrl = IdaSessionController(self.cfg)
                 ctrl._runtime_init_done.wait(timeout=5.0)
                 ctrl.shutdown()

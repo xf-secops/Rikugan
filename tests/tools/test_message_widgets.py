@@ -1,13 +1,57 @@
 """Tests for rikugan.ui.message_widgets — pure logic helpers."""
 
+# ruff: noqa: E402, I001
+
 from __future__ import annotations
 
 import unittest
 
 from tests.qt_stubs import ensure_pyside6_stubs
+
 ensure_pyside6_stubs()
 
-from rikugan.ui.message_widgets import _split_thinking  # noqa: E402
+from rikugan.ui.message_widgets import _assistant_bubble_theme, _split_thinking
+
+
+_LIGHT_TOKENS = {
+    "panel": "#f2f2f2",
+    "chat_canvas": "#eeeeee",
+    "assistant_bg": "#e9e9e9",
+    "tool_bg": "#ebebeb",
+    "thinking_bg": "#e6e6e6",
+    "input_bg": "#e4e4e4",
+    "text": "#202020",
+    "muted": "#8a8a8a",
+    "subtle": "#626262",
+    "border": "#b0b0b0",
+    "accent": "#1476a8",
+    "accent_text": "#ffffff",
+    "code_bg": "#e2e2e2",
+}
+
+_DARK_TOKENS = {
+    "panel": "#242424",
+    "chat_canvas": "#2d2d2d",
+    "assistant_bg": "#353535",
+    "tool_bg": "#333333",
+    "thinking_bg": "#393939",
+    "input_bg": "#3c3c3c",
+    "text": "#e6e6e6",
+    "muted": "#888888",
+    "subtle": "#aaaaaa",
+    "border": "#555555",
+    "accent": "#1678aa",
+    "accent_text": "#ffffff",
+    "code_bg": "#3a3a3a",
+}
+
+
+def _luminance(color: str) -> float:
+    color = color.lstrip("#")
+    r = int(color[0:2], 16) / 255.0
+    g = int(color[2:4], 16) / 255.0
+    b = int(color[4:6], 16) / 255.0
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
 # ---------------------------------------------------------------------------
@@ -26,7 +70,7 @@ class TestSplitThinking(unittest.TestCase):
         self.assertEqual(visible, "Before  After".strip())
 
     def test_visible_part_stripped(self):
-        thinking, visible = _split_thinking("<think>A</think>   result   ")
+        _thinking, visible = _split_thinking("<think>A</think>   result   ")
         self.assertEqual(visible, "result")
 
     def test_multiple_think_blocks(self):
@@ -53,7 +97,7 @@ class TestSplitThinking(unittest.TestCase):
         self.assertEqual(visible, "result")
 
     def test_think_whitespace_stripped(self):
-        thinking, visible = _split_thinking("<think>  trimmed  </think> x")
+        thinking, _visible = _split_thinking("<think>  trimmed  </think> x")
         self.assertEqual(thinking, "trimmed")
 
     def test_multiline_think_block(self):
@@ -73,6 +117,19 @@ class TestSplitThinking(unittest.TestCase):
         thinking, visible = _split_thinking(text)
         self.assertEqual(thinking, "")  # empty partial not added
         self.assertEqual(visible, "Before")
+
+
+class TestMessageBubbleThemes(unittest.TestCase):
+    def test_light_assistant_bubble_uses_light_surface_with_dark_text(self):
+        theme = _assistant_bubble_theme(_LIGHT_TOKENS)
+        self.assertGreater(_luminance(theme["background"]), 0.75)
+        self.assertLess(_luminance(theme["text"]), 0.25)
+
+    def test_dark_assistant_bubble_uses_dark_surface_with_light_text(self):
+        theme = _assistant_bubble_theme(_DARK_TOKENS)
+        self.assertGreater(_luminance(theme["background"]), 0.15)
+        self.assertLess(_luminance(theme["background"]), 0.35)
+        self.assertGreater(_luminance(theme["text"]), 0.75)
 
 
 if __name__ == "__main__":

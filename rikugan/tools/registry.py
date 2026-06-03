@@ -178,7 +178,10 @@ class ToolRegistry:
 
         result_str = self._format_result(result)
         if len(result_str) > TOOL_RESULT_TRUNCATE_LEN:
-            result_str = result_str[:TOOL_RESULT_TRUNCATE_LEN] + "\n... (truncated)"
+            result_str = (
+                result_str[:TOOL_RESULT_TRUNCATE_LEN]
+                + "\n... (truncated by global safety cap; use this tool's offset/limit or search parameters to continue)"
+            )
 
         # Cache result for read-only tools; invalidate on mutating tools
         self._result_cache.put(name, arguments, result_str)

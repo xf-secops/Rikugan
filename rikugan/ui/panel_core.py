@@ -28,9 +28,14 @@ from .qt_compat import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMenu,
     QMessageBox,
     QPushButton,
+    QSize,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     Qt,
@@ -44,6 +49,9 @@ from .qt_compat import (
     qt_run,
 )
 from .styles import (
+    build_chat_sidebar_stylesheet,
+    build_chat_view_stylesheet,
+    build_mini_tool_button_stylesheet,
     build_small_button_stylesheet,
     build_theme_stylesheet,
     maybe_host_stylesheet,
@@ -242,6 +250,301 @@ class _AddButtonTabBar(QTabBar):
             self._add_btn.move(0, 0)
 
 
+_BADGE_CSS: dict[str, str] = {
+    "Running": "color:#4ec9b0; background:rgba(78,201,176,0.15); border:1px solid rgba(78,201,176,0.4);",
+    "Approval": "color:#d7ba7d; background:rgba(215,186,125,0.15); border:1px solid rgba(215,186,125,0.4);",
+    "Queued": "color:#9cdcfe; background:rgba(156,220,254,0.12); border:1px solid rgba(156,220,254,0.35);",
+    "Error": "color:#f87171; background:rgba(248,113,113,0.15); border:1px solid rgba(248,113,113,0.4);",
+    "Cancelled": "color:#808080; background:rgba(128,128,128,0.10); border:1px solid rgba(128,128,128,0.3);",
+}
+
+
+class ChatThreadRow(QWidget):
+    """Compact row widget for one chat session."""
+
+    HEIGHT = 48
+
+    def __init__(self, parent: QWidget = None):
+        super().__init__(parent)
+        self.setMinimumHeight(self.HEIGHT)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 5, 8, 5)
+        layout.setSpacing(8)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(1)
+        self._title = QLabel(self)
+        self._title.setObjectName("chat_row_title")
+        self._title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._title.setMinimumWidth(0)
+        self._detail = QLabel(self)
+        self._detail.setObjectName("chat_row_detail")
+        self._detail.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._detail.setMinimumWidth(0)
+        text_layout.addWidget(self._title)
+        text_layout.addWidget(self._detail)
+        layout.addLayout(text_layout, 1)
+
+        self._badge = QLabel(self)
+        self._badge.setObjectName("chat_row_badge")
+        self._badge.hide()
+        layout.addWidget(self._badge)
+
+    def set_chat(self, title: str, detail: str, badge: str) -> None:
+        self._title.setText(title)
+        self._title.setToolTip(title)
+        self._detail.setText(detail)
+        self._detail.setVisible(bool(detail))
+        self._badge.setText(badge)
+        self._badge.setVisible(bool(badge))
+        if badge:
+            key = badge.split()[0].capitalize()
+            css = _BADGE_CSS.get(key, "")
+            self._badge.setStyleSheet(f"QLabel {{ {css} border-radius: 3px; padding: 1px 5px; font-size: 10px; }}")
+
+
+class ChatThreadList(QWidget):
+    """Sidebar list for chat sessions and their live state."""
+
+    _ROLE_TAB_ID = 32
+
+    def __init__(self, parent: QWidget = None):
+        super().__init__(parent)
+        self._select_callback: Callable[[str], None] | None = None
+        self._new_callback: Callable[[], None] | None = None
+        self._delete_callback: Callable[[str], None] | None = None
+        self._fork_callback: Callable[[str], None] | None = None
+        self._export_callback: Callable[[str], None] | None = None
+        self._items: dict[str, QListWidgetItem] = {}
+        self._rows: dict[str, ChatThreadRow] = {}
+        self._titles: dict[str, str] = {}
+        self._details: dict[str, str] = {}
+        self._statuses: dict[str, str] = {}
+        self._selected_tab_id: str | None = None
+        self._suppress_select = False
+        self.setObjectName("chat_sidebar")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        header = QWidget(self)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(8, 6, 8, 4)
+        title = QLabel("Chats", header)
+        title.setObjectName("chat_sidebar_title")
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        self._new_btn = self._make_action_button("New", "New chat", self._on_new, parent=header)
+        self._new_btn.setObjectName("chat_sidebar_new")
+        header_layout.addWidget(self._new_btn)
+        layout.addWidget(header)
+
+        actions = QWidget(self)
+        actions_layout = QHBoxLayout(actions)
+        actions_layout.setContentsMargins(8, 0, 8, 6)
+        actions_layout.setSpacing(4)
+        self._fork_btn = self._make_action_button("Fork", "Fork selected chat", self._on_fork_selected)
+        self._export_btn = self._make_action_button("Export", "Export selected chat", self._on_export_selected)
+        self._delete_btn = self._make_action_button(
+            "Delete",
+            "Delete selected chat",
+            self._on_delete_selected,
+            danger=True,
+        )
+        self._settings_btn = self._make_action_button("Settings", "Open settings", self._on_settings)
+        actions_layout.addWidget(self._fork_btn)
+        actions_layout.addWidget(self._export_btn)
+        actions_layout.addWidget(self._delete_btn)
+        actions_layout.addWidget(self._settings_btn)
+        actions_layout.addStretch()
+        layout.addWidget(actions)
+
+        self._search = QLineEdit(self)
+        self._search.setObjectName("chat_search")
+        self._search.setPlaceholderText("Search chats")
+        self._search.textChanged.connect(self._apply_filter)
+        layout.addWidget(self._search)
+
+        self._list = QListWidget(self)
+        self._list.setObjectName("chat_thread_list")
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.currentItemChanged.connect(self._on_current_changed)
+        self._list.itemClicked.connect(self._on_item_clicked)
+        self._list.itemActivated.connect(self._on_item_clicked)
+        self._list.customContextMenuRequested.connect(self._show_menu)
+        layout.addWidget(self._list, 1)
+
+        self.setMinimumWidth(224)
+        self.setMaximumWidth(340)
+        self.setStyleSheet(build_chat_sidebar_stylesheet(self))
+
+    def _make_action_button(
+        self,
+        text: str,
+        tooltip: str,
+        callback: Callable[[], None],
+        parent: QWidget | None = None,
+        danger: bool = False,
+    ) -> QToolButton:
+        button = QToolButton(parent or self)
+        button.setText(text)
+        button.setToolTip(tooltip)
+        button.setStyleSheet(build_mini_tool_button_stylesheet(self, danger=danger))
+        button.clicked.connect(callback)
+        return button
+
+    def set_callbacks(
+        self,
+        select: Callable[[str], None],
+        new: Callable[[], None],
+        delete: Callable[[str], None],
+        fork: Callable[[str], None],
+        export: Callable[[str], None],
+    ) -> None:
+        self._select_callback = select
+        self._new_callback = new
+        self._delete_callback = delete
+        self._fork_callback = fork
+        self._export_callback = export
+
+    def add_chat(self, tab_id: str, title: str, detail: str = "") -> None:
+        item = QListWidgetItem()
+        item.setData(self._ROLE_TAB_ID, tab_id)
+        row = ChatThreadRow(self._list)
+        self._items[tab_id] = item
+        self._rows[tab_id] = row
+        self._titles[tab_id] = title
+        self._details[tab_id] = detail
+        self._statuses.setdefault(tab_id, "idle")
+        self._list.addItem(item)
+        self._list.setItemWidget(item, row)
+        self._refresh_item(tab_id)
+
+    def remove_chat(self, tab_id: str) -> None:
+        item = self._items.pop(tab_id, None)
+        row_widget = self._rows.pop(tab_id, None)
+        self._titles.pop(tab_id, None)
+        self._details.pop(tab_id, None)
+        self._statuses.pop(tab_id, None)
+        if item is None:
+            return
+        if row_widget is not None:
+            row_widget.deleteLater()
+        row = self._list.row(item)
+        if row >= 0:
+            self._list.takeItem(row)
+
+    def select_chat(self, tab_id: str) -> None:
+        item = self._items.get(tab_id)
+        if item is not None:
+            self._suppress_select = True
+            self._list.setCurrentItem(item)
+            self._suppress_select = False
+            self._selected_tab_id = tab_id
+
+    def update_chat(self, tab_id: str, title: str | None = None, detail: str | None = None) -> None:
+        if title is not None:
+            self._titles[tab_id] = title
+        if detail is not None:
+            self._details[tab_id] = detail
+        self._refresh_item(tab_id)
+
+    def set_status(self, tab_id: str, status: str, pending: int = 0) -> None:
+        self._statuses[tab_id] = f"{status}:{pending}" if pending else status
+        self._refresh_item(tab_id)
+
+    def _refresh_item(self, tab_id: str) -> None:
+        item = self._items.get(tab_id)
+        if item is None:
+            return
+        title = self._titles.get(tab_id, "Untitled")
+        detail = self._details.get(tab_id, "")
+        status_raw = self._statuses.get(tab_id, "idle")
+        status, _, pending = status_raw.partition(":")
+        badge = {
+            "running": "Running",
+            "approval": "Approval",
+            "queued": f"{pending} queued" if pending else "Queued",
+            "error": "Error",
+            "cancelled": "Cancelled",
+        }.get(status, "")
+        # The custom row widget owns visible text. Leaving fallback item text
+        # set makes QListWidget paint a second, overlapping title in some hosts.
+        item.setText("")
+        item.setToolTip(title)
+        row = self._rows.get(tab_id)
+        if row is not None:
+            row.set_chat(title, detail, badge)
+        item.setSizeHint(QSize(0, ChatThreadRow.HEIGHT))
+        self._apply_filter()
+
+    def _apply_filter(self) -> None:
+        needle = self._search.text().strip().lower()
+        for tab_id, item in self._items.items():
+            haystack = f"{self._titles.get(tab_id, '')} {self._details.get(tab_id, '')}".lower()
+            item.setHidden(bool(needle and needle not in haystack))
+
+    def _on_new(self) -> None:
+        if self._new_callback is not None:
+            self._new_callback()
+
+    def _on_current_changed(self, current, _previous) -> None:
+        if current is None or self._select_callback is None or self._suppress_select:
+            return
+        tab_id = current.data(self._ROLE_TAB_ID)
+        if tab_id:
+            self._selected_tab_id = str(tab_id)
+            self._select_callback(self._selected_tab_id)
+
+    def _on_item_clicked(self, item) -> None:
+        if item is None or self._select_callback is None:
+            return
+        tab_id = item.data(self._ROLE_TAB_ID)
+        if tab_id:
+            self._selected_tab_id = str(tab_id)
+            self._select_callback(self._selected_tab_id)
+
+    def _on_fork_selected(self) -> None:
+        if self._selected_tab_id and self._fork_callback is not None:
+            self._fork_callback(self._selected_tab_id)
+
+    def _on_export_selected(self) -> None:
+        if self._selected_tab_id and self._export_callback is not None:
+            self._export_callback(self._selected_tab_id)
+
+    def _on_delete_selected(self) -> None:
+        if self._selected_tab_id and self._delete_callback is not None:
+            self._delete_callback(self._selected_tab_id)
+
+    def _on_settings(self) -> None:
+        parent = self.parent()
+        while parent is not None:
+            handler = getattr(parent, "_on_settings", None)
+            if callable(handler):
+                handler()
+                return
+            parent = parent.parent()
+
+    def _show_menu(self, pos) -> None:
+        item = self._list.itemAt(pos)
+        if item is None:
+            return
+        tab_id = str(item.data(self._ROLE_TAB_ID))
+        menu = QMenu(self)
+        fork_action = menu.addAction("Fork Chat")
+        export_action = menu.addAction("Export Chat")
+        delete_action = menu.addAction("Delete Chat")
+        action = qt_run(menu, self._list.mapToGlobal(pos))
+        if action == fork_action and self._fork_callback is not None:
+            self._fork_callback(tab_id)
+        elif action == export_action and self._export_callback is not None:
+            self._export_callback(tab_id)
+        elif action == delete_action and self._delete_callback is not None:
+            self._delete_callback(tab_id)
+
+
 class RikuganPanelCore(QWidget):
     """Host-agnostic chat panel widget."""
 
@@ -268,6 +571,8 @@ class RikuganPanelCore(QWidget):
         self._polling = False
         self._pending_answer = False
         self._awaiting_button_approval = False
+        self._pending_answer_tabs: set[str] = set()
+        self._awaiting_approval_tabs: set[str] = set()
         self._is_shutdown = False
         self._ui_hooks_factory = ui_hooks_factory
         self._ui_hooks = None
@@ -277,6 +582,8 @@ class RikuganPanelCore(QWidget):
         # Tab-to-ChatView mapping
         self._chat_views: dict[str, ChatView] = {}
         self._pending_restore_messages: dict[str, list] = {}
+        self._chat_sidebar: ChatThreadList | None = None
+        self._tab_status: dict[str, str] = {}
         self._context_bar: ContextBar | None = None
         self._mutation_panel: MutationLogPanel | None = None
         self._skills_refresh_timer: QTimer | None = None
@@ -424,8 +731,7 @@ class RikuganPanelCore(QWidget):
         chat_layout.setSpacing(0)
         self._build_tab_widget()
         self._build_main_splitter(chat_layout)
-        self._create_tab(self._ctrl.active_tab_id, "New Chat")
-        chat_layout.addWidget(self._build_input_section())
+        self._create_tab(self._ctrl.active_tab_id, "Untitled")
         self._mode_stack.addWidget(chat_page)
 
         # --- Page 1: Tools (lazily populated on first switch) ---
@@ -483,21 +789,41 @@ class RikuganPanelCore(QWidget):
         )
         self._tab_bar.setExpanding(False)
         self._tab_bar.setVisible(False)  # hidden until 2+ tabs
+        self._tab_widget.tabBar().hide()
 
     def _build_main_splitter(self, layout: QVBoxLayout) -> None:
         """Create the horizontal splitter (chat | mutation log) and add to layout."""
         self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._main_splitter.setHandleWidth(1)
         self._main_splitter.setStyleSheet(maybe_host_stylesheet("QSplitter::handle { background: #3c3c3c; }"))
-        self._main_splitter.addWidget(self._tab_widget)
+        self._chat_sidebar = ChatThreadList()
+        self._chat_sidebar.set_callbacks(
+            select=self._select_chat,
+            new=self._on_new_tab,
+            delete=self._delete_chat,
+            fork=self._fork_chat,
+            export=self._export_chat,
+        )
+        self._main_splitter.addWidget(self._chat_sidebar)
+        # Re-apply with the now-established parent palette (IDA may have set it after __init__)
+        self._chat_sidebar.setStyleSheet(build_chat_sidebar_stylesheet(self._chat_sidebar))
+
+        chat_column = QWidget()
+        chat_column_layout = QVBoxLayout(chat_column)
+        chat_column_layout.setContentsMargins(0, 0, 0, 0)
+        chat_column_layout.setSpacing(0)
+        chat_column_layout.addWidget(self._tab_widget, 1)
+        chat_column_layout.addWidget(self._build_input_section())
+        self._main_splitter.addWidget(chat_column)
 
         self._mutation_panel = MutationLogPanel()
         self._mutation_panel.undo_requested.connect(self._on_undo_requested)
         self._mutation_panel.setVisible(False)
         self._main_splitter.addWidget(self._mutation_panel)
 
-        self._main_splitter.setStretchFactor(0, 3)
-        self._main_splitter.setStretchFactor(1, 1)
+        self._main_splitter.setStretchFactor(0, 0)
+        self._main_splitter.setStretchFactor(1, 3)
+        self._main_splitter.setStretchFactor(2, 1)
 
         layout.addWidget(self._main_splitter, 1)
 
@@ -517,7 +843,7 @@ class RikuganPanelCore(QWidget):
         return self._input_container
 
     def _build_action_buttons(self) -> QVBoxLayout:
-        """Build the vertical stack of action buttons (Send, Stop, New, etc.)."""
+        """Build the lean composer action stack."""
         btn_layout = QVBoxLayout()
         btn_layout.setSpacing(4)
 
@@ -534,46 +860,14 @@ class RikuganPanelCore(QWidget):
         self._cancel_btn.setVisible(False)
         self._cancel_btn.clicked.connect(self._on_cancel)
         btn_layout.addWidget(self._cancel_btn)
-        self._new_btn = QPushButton("New")
-        self._new_btn.setFixedWidth(64)
-        self._new_btn.setStyleSheet(maybe_host_stylesheet(_SMALL_BTN_STYLE))
-        self._new_btn.clicked.connect(self._on_new_tab)
-        btn_layout.addWidget(self._new_btn)
-        self._export_btn = QPushButton("Export")
-        self._export_btn.setFixedWidth(64)
-        self._export_btn.setStyleSheet(maybe_host_stylesheet(_SMALL_BTN_STYLE))
-        self._export_btn.clicked.connect(self._on_export_current)
-        btn_layout.addWidget(self._export_btn)
-        self._settings_btn = QPushButton("Settings")
-        self._settings_btn.setFixedWidth(64)
-        self._settings_btn.setStyleSheet(maybe_host_stylesheet(_SMALL_BTN_STYLE))
-        self._settings_btn.clicked.connect(self._on_settings)
-        btn_layout.addWidget(self._settings_btn)
-        self._mutations_btn = QPushButton("Mutations")
-        self._mutations_btn.setFixedWidth(64)
-        self._mutations_btn.setStyleSheet(maybe_host_stylesheet(_SMALL_BTN_STYLE))
-        self._mutations_btn.setCheckable(True)
-        self._mutations_btn.clicked.connect(self._on_toggle_mutation_log)
-        self._mutations_btn.setVisible(False)  # shown when first mutation is recorded
-        btn_layout.addWidget(self._mutations_btn)
-
-        self._tools_btn = QPushButton("Tools")
-        self._tools_btn.setFixedWidth(64)
-        self._tools_btn.setStyleSheet(maybe_host_stylesheet(_SMALL_BTN_STYLE))
-        self._tools_btn.setCheckable(True)
-        self._tools_btn.clicked.connect(self._on_toggle_tools)
-        btn_layout.addWidget(self._tools_btn)
+        self._mutations_btn = None
+        self._tools_btn = None
 
         if self._use_native_host_theme:
             default_btn_style = build_small_button_stylesheet(self)
             danger_btn_style = build_small_button_stylesheet(self, danger=True)
             self._send_btn.setStyleSheet(default_btn_style)
             self._cancel_btn.setStyleSheet(danger_btn_style)
-            self._new_btn.setStyleSheet(default_btn_style)
-            self._export_btn.setStyleSheet(default_btn_style)
-            self._settings_btn.setStyleSheet(default_btn_style)
-            self._mutations_btn.setStyleSheet(default_btn_style)
-            self._tools_btn.setStyleSheet(default_btn_style)
 
         btn_layout.addStretch()
         return btn_layout
@@ -582,7 +876,7 @@ class RikuganPanelCore(QWidget):
 
     def _update_tab_bar_visibility(self) -> None:
         """Show the tab bar only when there are 2+ tabs."""
-        self._tab_bar.setVisible(self._tab_widget.count() > 1)
+        self._tab_bar.setVisible(False)
 
     def _create_tab(self, tab_id: str, label: str) -> ChatView:
         """Create a new ChatView and add it as a tab."""
@@ -592,46 +886,34 @@ class RikuganPanelCore(QWidget):
         chat_view.set_user_answer_callback(self._on_user_answer_submitted)
         self._chat_views[tab_id] = chat_view
         index = self._tab_widget.addTab(chat_view, label)
+        # Re-apply with the now-established parent palette
+        chat_view.setStyleSheet(build_chat_view_stylesheet(chat_view))
         self._tab_widget.setCurrentIndex(index)
+        if self._chat_sidebar is not None:
+            self._chat_sidebar.add_chat(tab_id, label, self._chat_detail(tab_id))
+            self._chat_sidebar.select_chat(tab_id)
         self._update_tab_bar_visibility()
         return chat_view
 
     def _on_new_tab(self) -> None:
-        """Create a new chat tab, with optional context clearing."""
+        """Create a fresh independent chat tab."""
         if self._is_shutdown:
             return
-        session = self._ctrl.session
-        has_messages = session and session.messages
-        if has_messages:
-            ctx_window = self._ctrl.get_context_window()
-            used = (
-                session.last_prompt_tokens
-                if session.last_prompt_tokens is not None
-                else session.total_usage.total_tokens
-            )
-            pct = min(int(used * 100 / ctx_window), 100) if ctx_window > 0 else 0
-            result = self._show_new_chat_dialog(pct)
-            if result == "no":
-                return
-            if result == "clear":
-                # Clear current tab instead of creating a new one
-                self._ctrl.new_chat()
-                chat_view = self._active_chat_view()
-                if chat_view:
-                    chat_view.clear_chat()
-                self._update_token_display(0)
-                self._update_tab_label(self._ctrl.active_tab_id)
-                return
-            # "yes" — fall through to create a new tab
         tab_id = self._ctrl.create_tab()
-        self._create_tab(tab_id, "New Chat")
         self._ctrl.switch_tab(tab_id)
+        self._create_tab(tab_id, "Untitled")
+        self._update_token_display(0)
+        self._set_running(False, tab_id=tab_id)
 
     def _on_fork_tab(self, index: int) -> None:
         """Fork (duplicate) a session into a new tab."""
         source_tab_id = self._tab_id_at_index(index)
         if source_tab_id is None:
             return
+        self._fork_chat(source_tab_id)
+
+    def _fork_chat(self, source_tab_id: str) -> None:
+        """Fork (duplicate) a session into a new chat."""
         new_tab_id = self._ctrl.fork_session(source_tab_id)
         if new_tab_id is None:
             return
@@ -644,6 +926,59 @@ class RikuganPanelCore(QWidget):
         self._ctrl.switch_tab(new_tab_id)
         log_info(f"Forked tab {source_tab_id} → {new_tab_id}")
 
+    def _select_chat(self, tab_id: str) -> None:
+        if tab_id not in self._chat_views:
+            return
+        cv = self._chat_views[tab_id]
+        for i in range(self._tab_widget.count()):
+            if self._tab_widget.widget(i) is cv:
+                self._tab_widget.setCurrentIndex(i)
+                break
+        self._ctrl.switch_tab(tab_id)
+        self._restore_messages_if_needed(tab_id)
+        self._update_token_display()
+        self._set_running(self._ctrl.is_tab_running(tab_id), tab_id=tab_id)
+        if self._chat_sidebar is not None:
+            self._chat_sidebar.select_chat(tab_id)
+
+    def _delete_chat(self, tab_id: str) -> None:
+        if self._is_shutdown:
+            return
+        session = self._ctrl.get_session(tab_id)
+        label = self._ctrl.tab_label(tab_id)
+        if session and session.messages:
+            reply = QMessageBox.question(
+                self,
+                "Delete Chat",
+                f"Delete '{label}' and remove it from saved history?",
+                qt_flags(QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No),
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        cv = self._chat_views.pop(tab_id, None)
+        if cv is not None:
+            for i in range(self._tab_widget.count()):
+                if self._tab_widget.widget(i) is cv:
+                    self._tab_widget.removeTab(i)
+                    break
+            cv.shutdown()
+            cv.deleteLater()
+        if self._chat_sidebar is not None:
+            self._chat_sidebar.remove_chat(tab_id)
+        self._ctrl.delete_tab(tab_id)
+        active = self._ctrl.active_tab_id
+        if active not in self._chat_views:
+            self._create_tab(active, "Untitled")
+        self._select_chat(active)
+        self._refresh_chat_sidebar()
+
+    def _export_chat(self, tab_id: str) -> None:
+        for i in range(self._tab_widget.count()):
+            if self._tab_id_at_index(i) == tab_id:
+                self._on_export_tab(i)
+                return
+
     def _on_close_tab(self, index: int) -> None:
         """Close a tab. Prevents closing the last tab."""
         if self._tab_widget.count() <= 1:
@@ -654,10 +989,13 @@ class RikuganPanelCore(QWidget):
         self._ctrl.close_tab(tab_id)
         chat_view = self._chat_views.pop(tab_id, None)
         self._tab_widget.removeTab(index)
+        if self._chat_sidebar is not None:
+            self._chat_sidebar.remove_chat(tab_id)
         if chat_view:
             chat_view.shutdown()
             chat_view.deleteLater()
         self._update_tab_bar_visibility()
+        self._refresh_chat_sidebar()
 
     def _on_export_tab(self, index: int) -> None:
         """Export a tab's chat to a Markdown file."""
@@ -780,6 +1118,9 @@ class RikuganPanelCore(QWidget):
         self._ctrl.switch_tab(tab_id)
         self._restore_messages_if_needed(tab_id)
         self._update_token_display()
+        if self._chat_sidebar is not None:
+            self._chat_sidebar.select_chat(tab_id)
+        self._set_running(self._ctrl.is_tab_running(tab_id), tab_id=tab_id)
 
     def _tab_id_at_index(self, index: int) -> str | None:
         """Find the tab_id for a given tab index via the stored property (O(1))."""
@@ -833,6 +1174,32 @@ class RikuganPanelCore(QWidget):
             if self._tab_widget.widget(i) is cv:
                 self._tab_widget.setTabText(i, label)
                 break
+        if self._chat_sidebar is not None:
+            self._chat_sidebar.update_chat(tab_id, label, self._chat_detail(tab_id))
+
+    def _chat_detail(self, tab_id: str) -> str:
+        session = self._ctrl.get_session(tab_id)
+        if session is None:
+            return ""
+        threads = max(1, session.current_turn)
+        changes = len(getattr(session, "mutation_log", []) or [])
+        detail = f"{threads} thread" + ("" if threads == 1 else "s")
+        if changes:
+            detail += f" · {changes} changes"
+        return detail
+
+    def _refresh_chat_sidebar(self) -> None:
+        if self._chat_sidebar is None:
+            return
+        for tab_id in self._chat_views:
+            self._chat_sidebar.update_chat(tab_id, self._ctrl.tab_label(tab_id), self._chat_detail(tab_id))
+            pending = self._ctrl.tab_pending_count(tab_id)
+            if tab_id in self._awaiting_approval_tabs:
+                self._chat_sidebar.set_status(tab_id, "approval")
+            elif self._ctrl.is_tab_running(tab_id):
+                self._chat_sidebar.set_status(tab_id, "queued" if pending else "running", pending)
+            else:
+                self._chat_sidebar.set_status(tab_id, self._tab_status.get(tab_id, "idle"))
 
     # --- Public API ---
 
@@ -897,7 +1264,7 @@ class RikuganPanelCore(QWidget):
         self._chat_views.clear()
         self._pending_restore_messages.clear()
         # Create default tab and try to restore saved sessions
-        self._create_tab(self._ctrl.active_tab_id, "New Chat")
+        self._create_tab(self._ctrl.active_tab_id, "Untitled")
         self._try_restore_session()
 
     def _on_submit(self, text: str) -> None:
@@ -906,24 +1273,26 @@ class RikuganPanelCore(QWidget):
         chat_view = self._active_chat_view()
         if chat_view is None:
             return
+        tab_id = self._ctrl.active_tab_id
         # Block free-text when awaiting button-only approval (plan/save).
-        if self._awaiting_button_approval:
+        if tab_id in self._awaiting_approval_tabs:
             log_debug(f"Ignoring text input while awaiting button approval: {text!r}")
             return
-        if self._pending_answer:
-            self._pending_answer = False
+        if tab_id in self._pending_answer_tabs:
+            self._pending_answer_tabs.discard(tab_id)
             chat_view.add_user_message(text)
-            self._set_running(True)
-            runner = self._ctrl.get_runner()
+            self._set_running(True, tab_id=tab_id)
+            runner = self._ctrl.get_runner_for_tab(tab_id)
             if runner:
                 runner.agent_loop.submit_user_answer(text)
             return
         # Queue while the agent is actively running.
-        if self._ctrl.is_agent_running:
-            self._ctrl.queue_message(text)
+        if self._ctrl.is_tab_running(tab_id):
+            self._ctrl.queue_message(text, tab_id=tab_id)
             chat_view.add_queued_message(text)
+            self._refresh_chat_sidebar()
             return
-        self._start_agent(text)
+        self._start_agent(text, tab_id=tab_id)
 
     def _on_send_clicked(self) -> None:
         text = self._input_area.toPlainText().strip()
@@ -936,11 +1305,17 @@ class RikuganPanelCore(QWidget):
             return
         self._pending_answer = False
         self._awaiting_button_approval = False
-        self._ctrl.cancel()
+        tab_id = self._ctrl.active_tab_id
+        self._pending_answer_tabs.discard(tab_id)
+        self._awaiting_approval_tabs.discard(tab_id)
+        self._tab_status[tab_id] = "cancelled"
+        self._ctrl.cancel(tab_id)
         # Remove [queued] widgets from the active chat view
         chat_view = self._active_chat_view()
         if chat_view is not None:
             chat_view.remove_queued_messages()
+        self._set_running(False, tab_id=tab_id)
+        self._refresh_chat_sidebar()
 
     def _on_settings(self) -> None:
         try:
@@ -993,20 +1368,24 @@ class RikuganPanelCore(QWidget):
             return "yes"
         return "no"
 
-    def _start_agent(self, user_message: str) -> None:
-        chat_view = self._active_chat_view()
+    def _start_agent(self, user_message: str, tab_id: str | None = None, display_user: bool = True) -> None:
+        tab_id = tab_id or self._ctrl.active_tab_id
+        chat_view = self._chat_views.get(tab_id)
         if chat_view is None:
             return
-        chat_view.add_user_message(user_message)
-        self._set_running(True)
+        if display_user:
+            chat_view.add_user_message(user_message)
+        self._tab_status[tab_id] = "running"
+        self._set_running(True, tab_id=tab_id)
 
         # Update tab label after first user message
-        self._update_tab_label(self._ctrl.active_tab_id)
+        self._update_tab_label(tab_id)
 
-        error = self._ctrl.start_agent(user_message)
+        error = self._ctrl.start_agent(user_message, tab_id=tab_id)
         if error:
             chat_view.add_error_message(error)
-            self._set_running(False)
+            self._tab_status[tab_id] = "error"
+            self._set_running(False, tab_id=tab_id)
             return
 
         self._ensure_poll_timer()
@@ -1034,37 +1413,42 @@ class RikuganPanelCore(QWidget):
             return
         self._polling = True
         try:
-            chat_view = self._active_chat_view()
-            container = chat_view._container if chat_view is not None else None
+            containers = []
             # Defer layout/paint passes until the whole batch is processed.
             # When 3 tools complete between ticks, each TOOL_RESULT makes a hidden
             # widget visible which triggers an O(n-widgets) layout cascade on the
             # chat container.  Batching those into one final pass cuts this from
             # O(k·n) to O(n) per tick.
-            if container is not None:
+            for tab_id, chat_view in self._chat_views.items():
+                if self._ctrl.get_runner_for_tab(tab_id) is None:
+                    continue
+                container = chat_view._container
+                containers.append(container)
                 container.setUpdatesEnabled(False)
             try:
-                for _ in range(30):
-                    event = self._ctrl.get_event(timeout=0)
-                    if event is None:
-                        if not self._ctrl.is_agent_running:
-                            self._on_agent_finished()
-                        return
-                    self._on_event(event)
+                for tab_id, event in self._ctrl.poll_events():
+                    self._on_event(tab_id, event)
             finally:
-                if container is not None:
+                for container in containers:
                     container.setUpdatesEnabled(True)
+            for tab_id in list(self._chat_views):
+                runner = self._ctrl.get_runner_for_tab(tab_id)
+                if runner is not None and not runner.agent_loop.is_running:
+                    self._on_agent_finished(tab_id)
+            if not self._ctrl.any_agent_running:
+                self._stop_poll_timer()
+            self._refresh_chat_sidebar()
         finally:
             self._polling = False
 
-    def _on_event(self, event: TurnEvent) -> None:
+    def _on_event(self, tab_id: str, event: TurnEvent) -> None:
         if self._is_shutdown:
             return
-        chat_view = self._active_chat_view()
+        chat_view = self._chat_views.get(tab_id)
         if chat_view is None:
             return
         chat_view.handle_event(event)
-        if event.usage:
+        if event.usage and tab_id == self._ctrl.active_tab_id:
             # Use prompt_tokens from the event directly — session hasn't
             # been updated yet during streaming, so session.last_prompt_tokens
             # would be stale.  prompt_tokens reflects current context size.
@@ -1076,7 +1460,7 @@ class RikuganPanelCore(QWidget):
             TurnEventType.SAVE_APPROVAL_REQUEST,
             TurnEventType.PLAN_GENERATED,
         ):
-            self._pending_answer = True
+            self._pending_answer_tabs.add(tab_id)
             # Plan approvals, save approvals, and any question with
             # predefined options MUST be answered via buttons only.
             # Disable text input so free-text ("continue", "redo", etc.)
@@ -1088,48 +1472,62 @@ class RikuganPanelCore(QWidget):
                 TurnEventType.SAVE_APPROVAL_REQUEST,
             ) or (has_options and not allow_text)
             if needs_button:
-                self._awaiting_button_approval = True
-            self._set_running(False)
+                self._awaiting_approval_tabs.add(tab_id)
+            self._set_running(False, tab_id=tab_id)
+        elif event.type == TurnEventType.ERROR:
+            self._tab_status[tab_id] = "error"
+        elif event.type == TurnEventType.CANCELLED:
+            self._tab_status[tab_id] = "cancelled"
+        else:
+            self._tab_status[tab_id] = "running"
         if event.type == TurnEventType.MUTATION_RECORDED:
             self._on_mutation_recorded(event)
 
     def _on_tool_approval(self, tool_call_id: str, decision: str) -> None:
         """Forward tool approval to the agent loop."""
-        runner = self._ctrl.get_runner()
+        runner = self._ctrl.get_runner_for_tab(self._ctrl.active_tab_id)
         if runner:
             runner.agent_loop.submit_tool_approval(decision)
 
     def _on_user_answer_submitted(self, answer: str) -> None:
         """Handle a button click from UserQuestionWidget (plan/save/ask_user)."""
-        if not self._pending_answer:
+        tab_id = self._ctrl.active_tab_id
+        if tab_id not in self._pending_answer_tabs:
             return
-        self._pending_answer = False
-        self._awaiting_button_approval = False
+        self._pending_answer_tabs.discard(tab_id)
+        self._awaiting_approval_tabs.discard(tab_id)
         chat_view = self._active_chat_view()
         if chat_view is not None:
             chat_view.add_user_message(answer)
-        self._set_running(True)
-        runner = self._ctrl.get_runner()
+        self._set_running(True, tab_id=tab_id)
+        runner = self._ctrl.get_runner_for_tab(tab_id)
         if runner:
             runner.agent_loop.submit_user_answer(answer)
 
-    def _on_agent_finished(self) -> None:
+    def _on_agent_finished(self, tab_id: str | None = None) -> None:
         if self._is_shutdown:
             return
-        if self._poll_timer:
-            self._poll_timer.stop()
+        tab_id = tab_id or self._ctrl.active_tab_id
 
         # Clear approval state — if the agent crashed mid-approval the
         # buttons are stale and free-text input must be restored.
         self._pending_answer = False
         self._awaiting_button_approval = False
 
-        self._ctrl.on_agent_finished()
+        next_message = self._ctrl.on_agent_finished(tab_id)
         # Remove any [queued] widgets since the queue was cleared.
-        chat_view = self._active_chat_view()
+        chat_view = self._chat_views.get(tab_id)
         if chat_view is not None:
-            chat_view.remove_queued_messages()
-        self._set_running(False)
+            if next_message:
+                chat_view.pop_first_queued_message()
+            else:
+                chat_view.remove_queued_messages()
+        if next_message:
+            self._start_agent(next_message, tab_id=tab_id)
+            return
+        if self._tab_status.get(tab_id) == "running":
+            self._tab_status[tab_id] = "idle"
+        self._set_running(False, tab_id=tab_id)
 
     def _try_restore_session(self) -> None:
         restored = self._ctrl.restore_sessions()
@@ -1187,8 +1585,8 @@ class RikuganPanelCore(QWidget):
             reversible=meta.get("reversible", False),
         )
         self._mutation_panel.add_mutation(record)
-        # Show the mutations button once the first mutation is recorded
-        self._mutations_btn.setVisible(True)
+        if self._mutations_btn is not None:
+            self._mutations_btn.setVisible(True)
 
     def _on_toggle_mutation_log(self) -> None:
         """Toggle visibility of the mutation log panel."""
@@ -1196,16 +1594,19 @@ class RikuganPanelCore(QWidget):
             return
         visible = not self._mutation_panel.isVisible()
         self._mutation_panel.setVisible(visible)
-        self._mutations_btn.setChecked(visible)
+        if self._mutations_btn is not None:
+            self._mutations_btn.setChecked(visible)
 
     def _on_mode_changed(self, index: int) -> None:
         """Handle the Chat / Tools mode bar switch."""
         self._mode_stack.setCurrentIndex(index)
         if index == 1:
             self._ensure_tools_initialized()
-            self._tools_btn.setChecked(True)
+            if self._tools_btn is not None:
+                self._tools_btn.setChecked(True)
         else:
-            self._tools_btn.setChecked(False)
+            if self._tools_btn is not None:
+                self._tools_btn.setChecked(False)
 
     def _on_toggle_tools(self) -> None:
         """Toggle the Tools view (IDA-docked or embedded mode tab)."""
@@ -1217,10 +1618,12 @@ class RikuganPanelCore(QWidget):
             # IDA dockable form
             if self._tools_form.is_visible:
                 self._tools_form.hide()
-                self._tools_btn.setChecked(False)
+                if self._tools_btn is not None:
+                    self._tools_btn.setChecked(False)
             else:
                 self._tools_form.show()
-                self._tools_btn.setChecked(True)
+                if self._tools_btn is not None:
+                    self._tools_btn.setChecked(True)
         else:
             # Toggle mode bar between Chat (0) and Tools (1)
             current = self._mode_bar.currentIndex()
@@ -1242,7 +1645,8 @@ class RikuganPanelCore(QWidget):
             self._mode_bar.setCurrentIndex(1)
             if hasattr(self._tools_panel, "_tabs"):
                 self._tools_panel._tabs.setCurrentIndex(tab_index)
-        self._tools_btn.setChecked(True)
+        if self._tools_btn is not None:
+            self._tools_btn.setChecked(True)
 
     def show_tools_with_renamer(self, address: int | None = None) -> None:
         """Show the tools panel on the Renamer tab.
@@ -1583,7 +1987,14 @@ class RikuganPanelCore(QWidget):
         # Submit /undo command through the normal agent path
         self._start_agent(f"/undo {count}")
 
-    def _set_running(self, running: bool) -> None:
+    def _set_running(self, running: bool, tab_id: str | None = None) -> None:
+        tab_id = tab_id or self._ctrl.active_tab_id
+        active_tab_id = self._ctrl.active_tab_id
+        active_running = self._ctrl.is_tab_running(active_tab_id)
+        if tab_id == active_tab_id:
+            active_running = running
+        self._pending_answer = active_tab_id in self._pending_answer_tabs
+        self._awaiting_button_approval = active_tab_id in self._awaiting_approval_tabs
         # Keep input enabled so users can queue follow-up messages while
         # running — UNLESS we're waiting for a button-only approval.
         if self._awaiting_button_approval:
@@ -1591,7 +2002,7 @@ class RikuganPanelCore(QWidget):
             self._input_area.setPlaceholderText("Use the Approve/Reject buttons above to continue.")
         else:
             self._input_area.set_enabled(True)
-            if running:
+            if active_running:
                 self._input_area.setPlaceholderText(
                     "Rikugan is thinking... press Enter (or Queue) to queue a follow-up."
                 )
@@ -1600,5 +2011,6 @@ class RikuganPanelCore(QWidget):
 
         self._send_btn.setVisible(True)
         self._send_btn.setEnabled(not self._awaiting_button_approval)
-        self._send_btn.setText("Queue" if running else "Send")
-        self._cancel_btn.setVisible(running)
+        self._send_btn.setText("Queue" if active_running else "Send")
+        self._cancel_btn.setVisible(active_running)
+        self._refresh_chat_sidebar()

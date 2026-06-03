@@ -19,7 +19,7 @@ from __future__ import annotations
 import html
 import re
 
-from .styles import blend_theme_color, get_host_palette_colors, use_native_host_theme
+from .styles import blend_theme_color, get_chat_color_tokens
 
 _MARKDOWN_HINT_RE = re.compile(
     r"(^#{1,4}\s)|(^\s*[-*]\s+)|(^\s*\d+[.)]\s+)|```|`[^`]+`|\*\*|__|(?<!\w)\*(.+?)\*(?!\w)|(?<!\w)_(.+?)_(?!\w)|\[[^\]]+\]\([^)]+\)|^[-*_]{3,}\s*$",
@@ -28,36 +28,26 @@ _MARKDOWN_HINT_RE = re.compile(
 
 
 def _theme_markdown_styles(source=None) -> dict[str, str]:
-    if use_native_host_theme():
-        return {
-            "inline_code_style": "font-family:monospace;",
-            "block_code_style": "font-family:monospace; white-space:pre-wrap;",
-            "link_style": "text-decoration: underline;",
-            "hr_style": "",
-            "heading_style": "font-weight:bold;",
-            "lang_tag_style": "font-size:10px;",
-        }
-
-    colors = get_host_palette_colors(source)
-    code_bg = blend_theme_color(colors["base"], colors["window"], 0.15)
-    inline_fg = blend_theme_color(colors["highlight"], colors["text"], 0.3)
-    border = blend_theme_color(colors["mid"], colors["window"], 0.35)
-    heading = blend_theme_color(colors["highlight"], colors["text"], 0.15)
+    colors = get_chat_color_tokens(source)
+    code_bg = colors["code_bg"]
+    inline_fg = blend_theme_color(colors["accent"], colors["text"], 0.3)
+    border = colors["border"]
+    heading = blend_theme_color(colors["accent"], colors["text"], 0.15)
     return {
         "inline_code_style": (
             f"background-color:{code_bg}; color:{inline_fg}; "
             "padding:1px 4px; border-radius:3px; font-family:monospace; font-size:12px;"
         ),
         "block_code_style": (
-            f"background-color:{colors['base']}; color:{colors['text']}; "
+            f"background-color:{code_bg}; color:{colors['text']}; "
             f"border:1px solid {border}; border-radius:4px; "
             "padding:8px; font-family:monospace; font-size:12px; "
             "white-space:pre-wrap; word-break:break-all;"
         ),
-        "link_style": f"color:{colors['highlight']};",
+        "link_style": f"color:{colors['accent']};",
         "hr_style": f"border:1px solid {border};",
         "heading_style": f"color:{heading}; font-weight:bold;",
-        "lang_tag_style": f"color:{blend_theme_color(colors['text'], colors['window'], 0.45)};font-size:10px;",
+        "lang_tag_style": f"color:{colors['muted']};font-size:10px;",
     }
 
 

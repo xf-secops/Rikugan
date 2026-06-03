@@ -7,6 +7,7 @@ from typing import Annotated
 
 from ...core.logging import log_debug
 from ...tools.base import tool
+from ...tools.pagination import format_page, normalize_page
 from ...tools.xrefs import format_callers_callees
 from .compat import parse_addr_like, require_bv
 from .fn_utils import get_function_at, get_function_name
@@ -82,50 +83,54 @@ def _refs_from(bv, ea: int) -> list[tuple[int, str]]:
 @tool(category="xrefs")
 def xrefs_to(
     address: Annotated[str, "Target address (hex string)"],
+    offset: Annotated[int, "Start index for pagination"] = 0,
     limit: Annotated[int, "Max results"] = 30,
 ) -> str:
-    """Get all cross-references to the given address."""
+    """Get cross-references to the given address with pagination."""
     bv = require_bv()
     ea = parse_addr_like(address)
     target_name = resolve_name_at(bv, ea)
-    lines = [f"Cross-references to 0x{ea:x}" + (f" ({target_name})" if target_name else "") + ":"]
-
     refs = list(_code_refs_to(bv, ea)) + list(_data_refs_to(bv, ea))
     refs.sort(key=lambda x: x[0])
-    count = 0
+    rows = []
     for src, kind, fname in refs:
-        if count >= limit:
-            lines.append(f"  ... (truncated at {limit})")
-            break
-        lines.append(f"  0x{src:x}  [{kind:12s}]  in {fname}")
-        count += 1
-    if count == 0:
-        lines.append("  (none)")
-    return "\n".join(lines)
+        rows.append(f"  0x{src:x}  [{kind:12s}]  in {fname}")
+    page_offset, page_limit = normalize_page(offset, limit)
+    next_offset = min(len(rows), page_offset + page_limit)
+    title = f"Cross-references to 0x{ea:x}" + (f" ({target_name})" if target_name else "")
+    return format_page(
+        rows,
+        offset=offset,
+        limit=limit,
+        title=title,
+        next_hint=f"Call xrefs_to with offset={next_offset} limit={page_limit}.",
+    )
 
 
 @tool(category="xrefs")
 def xrefs_from(
     address: Annotated[str, "Source address (hex string)"],
+    offset: Annotated[int, "Start index for pagination"] = 0,
     limit: Annotated[int, "Max results"] = 30,
 ) -> str:
-    """Get all cross-references from the given address."""
+    """Get cross-references from the given address with pagination."""
     bv = require_bv()
     ea = parse_addr_like(address)
-    lines = [f"Cross-references from 0x{ea:x}:"]
 
     refs = _refs_from(bv, ea)
-    count = 0
+    rows = []
     for dst, kind in refs:
-        if count >= limit:
-            lines.append(f"  ... (truncated at {limit})")
-            break
         target_name = resolve_name_at(bv, dst) or ""
-        lines.append(f"  0x{dst:x}  [{kind:12s}]  {target_name}")
-        count += 1
-    if count == 0:
-        lines.append("  (none)")
-    return "\n".join(lines)
+        rows.append(f"  0x{dst:x}  [{kind:12s}]  {target_name}")
+    page_offset, page_limit = normalize_page(offset, limit)
+    next_offset = min(len(rows), page_offset + page_limit)
+    return format_page(
+        rows,
+        offset=offset,
+        limit=limit,
+        title=f"Cross-references from 0x{ea:x}",
+        next_hint=f"Call xrefs_from with offset={next_offset} limit={page_limit}.",
+    )
 
 
 @tool(category="xrefs")

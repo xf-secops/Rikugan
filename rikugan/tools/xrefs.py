@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import Annotated, Any
 
 from .base import parse_addr, tool
+from .pagination import format_page, normalize_page
 
 
 def format_callers_callees(fname: str, start: int, callers: Iterable[str], callees: Iterable[str]) -> str:
@@ -62,54 +63,56 @@ def _xref_type_name(xtype: int) -> str:
 @tool(category="xrefs")
 def xrefs_to(
     address: Annotated[str, "Target address (hex string)"],
+    offset: Annotated[int, "Start index for pagination"] = 0,
     limit: Annotated[int, "Max results"] = 30,
 ) -> str:
-    """Get all cross-references to the given address."""
+    """Get cross-references to the given address with pagination."""
 
     ea = parse_addr(address)
     target_name = ida_name.get_name(ea)
-    lines = [f"Cross-references to 0x{ea:x}" + (f" ({target_name})" if target_name else "") + ":"]
-
-    count = 0
+    rows = []
     for xref in idautils.XrefsTo(ea, 0):
-        if count >= limit:
-            lines.append(f"  ... (truncated at {limit})")
-            break
-
         xtype = _xref_type_name(xref.type)
         func = ida_funcs.get_func(xref.frm)
         fname = ida_name.get_name(func.start_ea) if func else "?"
-        lines.append(f"  0x{xref.frm:x}  [{xtype:12s}]  in {fname}")
-        count += 1
+        rows.append(f"  0x{xref.frm:x}  [{xtype:12s}]  in {fname}")
 
-    if count == 0:
-        lines.append("  (none)")
-    return "\n".join(lines)
+    page_offset, page_limit = normalize_page(offset, limit)
+    next_offset = min(len(rows), page_offset + page_limit)
+    title = f"Cross-references to 0x{ea:x}" + (f" ({target_name})" if target_name else "")
+    return format_page(
+        rows,
+        offset=offset,
+        limit=limit,
+        title=title,
+        next_hint=f"Call xrefs_to with offset={next_offset} limit={page_limit}.",
+    )
 
 
 @tool(category="xrefs")
 def xrefs_from(
     address: Annotated[str, "Source address (hex string)"],
+    offset: Annotated[int, "Start index for pagination"] = 0,
     limit: Annotated[int, "Max results"] = 30,
 ) -> str:
-    """Get all cross-references from the given address."""
+    """Get cross-references from the given address with pagination."""
 
     ea = parse_addr(address)
-    lines = [f"Cross-references from 0x{ea:x}:"]
-
-    count = 0
+    rows = []
     for xref in idautils.XrefsFrom(ea, 0):
-        if count >= limit:
-            lines.append(f"  ... (truncated at {limit})")
-            break
         xtype = _xref_type_name(xref.type)
         target_name = ida_name.get_name(xref.to) or ""
-        lines.append(f"  0x{xref.to:x}  [{xtype:12s}]  {target_name}")
-        count += 1
+        rows.append(f"  0x{xref.to:x}  [{xtype:12s}]  {target_name}")
 
-    if count == 0:
-        lines.append("  (none)")
-    return "\n".join(lines)
+    page_offset, page_limit = normalize_page(offset, limit)
+    next_offset = min(len(rows), page_offset + page_limit)
+    return format_page(
+        rows,
+        offset=offset,
+        limit=limit,
+        title=f"Cross-references from 0x{ea:x}",
+        next_hint=f"Call xrefs_from with offset={next_offset} limit={page_limit}.",
+    )
 
 
 @tool(category="xrefs")

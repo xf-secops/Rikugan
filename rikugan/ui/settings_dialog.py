@@ -19,6 +19,7 @@ from .qt_compat import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -485,6 +486,21 @@ class SettingsDialog(QDialog):
         self._auto_save_cb.setChecked(self._config.checkpoint_auto_save)
         behavior_form.addRow(self._auto_save_cb)
 
+        self._restore_sessions_cb = QCheckBox("Restore previous chats on startup")
+        self._restore_sessions_cb.setChecked(self._config.restore_sessions_on_start)
+        self._restore_sessions_cb.setToolTip("Disable this when large analysis sessions make the panel slow to open.")
+        behavior_form.addRow(self._restore_sessions_cb)
+
+        storage_row = QHBoxLayout()
+        self._session_storage_edit = QLineEdit(self._config.session_storage_dir)
+        self._session_storage_edit.setPlaceholderText("Default: Rikugan config/checkpoints")
+        storage_row.addWidget(self._session_storage_edit, 1)
+        self._session_storage_btn = QPushButton("Browse")
+        self._session_storage_btn.setFixedWidth(70)
+        self._session_storage_btn.clicked.connect(self._choose_session_storage_dir)
+        storage_row.addWidget(self._session_storage_btn)
+        behavior_form.addRow("Session storage:", storage_row)
+
         self._explore_turns_spin = QSpinBox()
         self._explore_turns_spin.setRange(5, 200)
         self._explore_turns_spin.setValue(self._config.exploration_turn_limit)
@@ -643,6 +659,15 @@ class SettingsDialog(QDialog):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._update_auth_status()
             self._fetch_models()
+
+    def _choose_session_storage_dir(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Choose Session Storage Directory",
+            self._session_storage_edit.text().strip() or self._config.checkpoints_dir,
+        )
+        if path:
+            self._session_storage_edit.setText(path)
 
     def _on_oauth_toggled(self, checked: bool) -> None:
         """Handle the OAuth checkbox toggle."""
@@ -903,6 +928,8 @@ class SettingsDialog(QDialog):
         self._config.provider.api_base = self._api_base_edit.text().strip()
         self._config.auto_context = self._auto_context_cb.isChecked()
         self._config.checkpoint_auto_save = self._auto_save_cb.isChecked()
+        self._config.restore_sessions_on_start = self._restore_sessions_cb.isChecked()
+        self._config.session_storage_dir = self._session_storage_edit.text().strip()
         self._config.exploration_turn_limit = self._explore_turns_spin.value()
         self._config.max_retries = self._max_retries_spin.value()
         self._config.silent_retry_mode = self._silent_retry_cb.isChecked()

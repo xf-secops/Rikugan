@@ -9,7 +9,6 @@ allowed_tools:
   - read_function_disassembly
   - get_instruction_info
   - decompile_function
-  - get_pseudocode
   - get_il
   - read_bytes
   - execute_python

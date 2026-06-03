@@ -132,37 +132,68 @@ if defined BN_PYTHON (
 )
 
 :: 2. Try Binary Ninja's bundled Python
-:: Windows: BN ships a bundled Python with python.exe inside the install dir
+:: Windows: recent BN builds ship Python under plugins\python\python.exe.
+:: Older builds used bundled-python3\python.exe. Prefer BN's own Python so
+:: dependencies land in the interpreter Binary Ninja actually embeds.
 set "BN_FOUND_PYTHON="
 set "BN_FOUND_HOME="
 
-if exist "%ProgramFiles%\Vector35\BinaryNinja\bundled-python3\python.exe" (
-    set "BN_FOUND_PYTHON=%ProgramFiles%\Vector35\BinaryNinja\bundled-python3\python.exe"
-    set "BN_FOUND_HOME=%ProgramFiles%\Vector35\BinaryNinja\bundled-python3"
-)
-if not defined BN_FOUND_PYTHON if exist "%LOCALAPPDATA%\Vector35\BinaryNinja\bundled-python3\python.exe" (
-    set "BN_FOUND_PYTHON=%LOCALAPPDATA%\Vector35\BinaryNinja\bundled-python3\python.exe"
-    set "BN_FOUND_HOME=%LOCALAPPDATA%\Vector35\BinaryNinja\bundled-python3"
-)
-if not defined BN_FOUND_PYTHON if exist "%ProgramFiles(x86)%\Vector35\BinaryNinja\bundled-python3\python.exe" (
-    set "BN_FOUND_PYTHON=%ProgramFiles(x86)%\Vector35\BinaryNinja\bundled-python3\python.exe"
-    set "BN_FOUND_HOME=%ProgramFiles(x86)%\Vector35\BinaryNinja\bundled-python3"
+for %%P in (
+    "%LOCALAPPDATA%\Programs\Vector35\BinaryNinja\plugins\python\python.exe"
+    "%LOCALAPPDATA%\Programs\Vector35\Binary Ninja\plugins\python\python.exe"
+    "%ProgramFiles%\Vector35\BinaryNinja\plugins\python\python.exe"
+    "%ProgramFiles%\Vector35\Binary Ninja\plugins\python\python.exe"
+    "%ProgramFiles(x86)%\Vector35\BinaryNinja\plugins\python\python.exe"
+    "%ProgramFiles(x86)%\Vector35\Binary Ninja\plugins\python\python.exe"
+    "%LOCALAPPDATA%\Programs\Vector35\BinaryNinja\bundled-python3\python.exe"
+    "%LOCALAPPDATA%\Programs\Vector35\Binary Ninja\bundled-python3\python.exe"
+    "%ProgramFiles%\Vector35\BinaryNinja\bundled-python3\python.exe"
+    "%ProgramFiles%\Vector35\Binary Ninja\bundled-python3\python.exe"
+    "%ProgramFiles(x86)%\Vector35\BinaryNinja\bundled-python3\python.exe"
+    "%ProgramFiles(x86)%\Vector35\Binary Ninja\bundled-python3\python.exe"
+) do (
+    if not defined BN_FOUND_PYTHON if exist "%%~P" (
+        set "BN_FOUND_PYTHON=%%~P"
+        set "BN_FOUND_HOME=%%~dpP"
+        if "!BN_FOUND_HOME:~-1!"=="\" set "BN_FOUND_HOME=!BN_FOUND_HOME:~0,-1!"
+    )
 )
 
 if defined BN_FOUND_PYTHON (
     echo [*] Found Binary Ninja Python: !BN_FOUND_PYTHON!
-    set "PYTHONHOME=!BN_FOUND_HOME!"
     "!BN_FOUND_PYTHON!" -m pip install -r "%REQ%"
     if !errorlevel! equ 0 (
-        set "PYTHONHOME="
         echo [+] Dependencies installed into Binary Ninja's Python
         exit /b 0
     )
-    set "PYTHONHOME="
+    echo [!] BN Python pip install failed, trying ensurepip...
+    "!BN_FOUND_PYTHON!" -m ensurepip --upgrade >nul 2>&1
+    if !errorlevel! equ 0 (
+        "!BN_FOUND_PYTHON!" -m pip install -r "%REQ%"
+        if !errorlevel! equ 0 (
+            echo [+] Dependencies installed into Binary Ninja's Python
+            exit /b 0
+        )
+    )
     echo [!] BN Python pip install failed, trying system Python...
 )
 
-:: 3. Fallback: system Python
+:: 3. Fallback: Python launcher, then system Python.
+where py >nul 2>&1
+if !errorlevel! equ 0 (
+    echo [*] Installing Python dependencies with: py -3 -m pip
+    py -3 -m pip install -r "%REQ%"
+    if !errorlevel! equ 0 (
+        echo [+] Dependencies installed successfully
+        exit /b 0
+    )
+    py -3 -m pip install --user -r "%REQ%"
+    if !errorlevel! equ 0 (
+        echo [+] Dependencies installed successfully --user
+        exit /b 0
+    )
+)
+
 where python3 >nul 2>&1
 if !errorlevel! equ 0 (
     echo [*] Installing Python dependencies with: python3 -m pip

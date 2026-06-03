@@ -44,6 +44,8 @@ class RikuganConfig:
     auto_context: bool = True
     plan_mode_default: bool = False
     checkpoint_auto_save: bool = True
+    restore_sessions_on_start: bool = True
+    session_storage_dir: str = ""
     approve_mutations: bool = False  # require approval for mutating tools (rename, retype, etc.)
     exploration_turn_limit: int = 100  # max turns in exploration phase before forcing transition
     max_retries: int = 3  # max retries on rate-limit / transient API errors
@@ -85,6 +87,8 @@ class RikuganConfig:
 
     @property
     def checkpoints_dir(self) -> str:
+        if self.session_storage_dir:
+            return os.path.abspath(os.path.expanduser(self.session_storage_dir))
         return os.path.join(self._config_dir, "checkpoints")
 
     @property
@@ -173,6 +177,8 @@ class RikuganConfig:
             "auto_context",
             "plan_mode_default",
             "checkpoint_auto_save",
+            "restore_sessions_on_start",
+            "session_storage_dir",
             "approve_mutations",
             "exploration_turn_limit",
             "max_retries",

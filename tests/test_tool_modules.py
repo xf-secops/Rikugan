@@ -47,14 +47,14 @@ class TestListExports(unittest.TestCase):
     def test_returns_exports_header(self):
         from rikugan.ida.tools.database import list_exports
         result = list_exports()
-        self.assertTrue(result.startswith("Exports:"))
+        self.assertTrue(result.startswith("Exports 0-"))
 
 
 class TestListImports(unittest.TestCase):
     def test_returns_imports_header(self):
         from rikugan.ida.tools.database import list_imports
         result = list_imports()
-        self.assertTrue(result.startswith("Imports:"))
+        self.assertTrue(result.startswith("Imports 0-"))
 
 
 class TestReadBytes(unittest.TestCase):
@@ -67,6 +67,15 @@ class TestReadBytes(unittest.TestCase):
         from rikugan.ida.tools.database import read_bytes
         result = read_bytes("0x1000", size=9999)
         self.assertIsInstance(result, str)
+
+
+class TestReadGlobalValue(unittest.TestCase):
+    def test_interprets_global_value(self):
+        from rikugan.ida.tools.database import read_global_value
+        result = read_global_value("0x1000", type_hint="u32")
+        self.assertIn("Global value at 0x1000", result)
+        self.assertIn("u32:", result)
+        self.assertIn("Bytes:", result)
 
 
 # --- Function tools --------------------------------------------------------

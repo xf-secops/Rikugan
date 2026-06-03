@@ -97,6 +97,12 @@ class TestRegistryCategories(unittest.TestCase):
         names = self.registry.list_names()
         self.assertIn("get_binary_info", names)
         self.assertIn("list_segments", names)
+        self.assertIn("read_global_value", names)
+
+    def test_decompiler_tool_surface_is_simplified(self):
+        names = self.registry.list_names()
+        self.assertIn("decompile_function", names)
+        self.assertNotIn("get_pseudocode", names)
 
     def test_string_tools(self):
         names = self.registry.list_names()

@@ -7,9 +7,12 @@ from typing import Annotated
 
 from ...core.logging import log_debug
 from ...tools.base import parse_addr, tool
+from ...tools.pagination import format_page, normalize_page
+from ...tools.value_format import bytes_needed_for_type, format_global_value
 
 try:
     ida_ida = importlib.import_module("ida_ida")
+    ida_name = importlib.import_module("ida_name")
     ida_nalt = importlib.import_module("ida_nalt")
     ida_segment = importlib.import_module("ida_segment")
     idaapi = importlib.import_module("idaapi")
@@ -42,42 +45,81 @@ def list_segments() -> str:
     return "\n".join(lines)
 
 
-@tool(category="database")
-def list_imports() -> str:
-    """List all imported functions."""
+def _resolve_addr_or_name(value: str) -> int:
+    try:
+        return parse_addr(value)
+    except (TypeError, ValueError):
+        ea = ida_name.get_name_ea(idc.BADADDR, value)
+        if ea == idc.BADADDR:
+            raise ValueError(f"Unknown address or name: {value}") from None
+        return ea
 
-    lines = ["Imports:"]
+
+def _pointer_size() -> int:
+    try:
+        return 8 if ida_ida.inf_is_64bit() else 4 if ida_ida.inf_is_32bit() else 2
+    except AttributeError:
+        return 8
+
+
+def _read_raw_bytes(ea: int, size: int) -> bytes:
+    return bytes(idc.get_wide_byte(ea + i) & 0xFF for i in range(max(0, size)))
+
+
+def _resolve_pointer_name(ea: int) -> str:
+    if ea in (0, idc.BADADDR):
+        return ""
+    return ida_name.get_name(ea) or ""
+
+
+@tool(category="database")
+def list_imports(
+    offset: Annotated[int, "Start index for pagination"] = 0,
+    limit: Annotated[int, "Max imports to return"] = 80,
+) -> str:
+    """List imported functions with pagination."""
+
+    rows = []
     nimps = ida_nalt.get_import_module_qty()
     for i in range(nimps):
         mod_name = ida_nalt.get_import_module_name(i)
-        entries: list = []
 
         def _cb(ea, name, ordinal):
             if name:
-                entries.append(f"    0x{ea:x}  {name}")  # noqa: B023
+                rows.append(f"  [{mod_name}]  0x{ea:x}  {name}")  # noqa: B023
             else:
-                entries.append(f"    0x{ea:x}  ordinal #{ordinal}")  # noqa: B023
+                rows.append(f"  [{mod_name}]  0x{ea:x}  ordinal #{ordinal}")  # noqa: B023
             return True
 
         ida_nalt.enum_import_names(i, _cb)
-        lines.append(f"  [{mod_name}] ({len(entries)} imports)")
-        lines.extend(entries[:50])
-        if len(entries) > 50:
-            lines.append(f"    ... and {len(entries) - 50} more")
-    return "\n".join(lines)
+    page_offset, page_limit = normalize_page(offset, limit)
+    next_offset = min(len(rows), page_offset + page_limit)
+    return format_page(
+        rows,
+        offset=offset,
+        limit=limit,
+        title="Imports",
+        next_hint=f"Call list_imports with offset={next_offset} limit={page_limit}.",
+    )
 
 
 @tool(category="database")
-def list_exports() -> str:
-    """List all exported functions/symbols."""
+def list_exports(
+    offset: Annotated[int, "Start index for pagination"] = 0,
+    limit: Annotated[int, "Max exports to return"] = 80,
+) -> str:
+    """List exported functions/symbols with pagination."""
 
-    lines = ["Exports:"]
-    for i, (_, _, ea, name) in enumerate(idautils.Entries()):
-        lines.append(f"  0x{ea:x}  {name}")
-        if i >= 200:
-            lines.append("  ... (truncated)")
-            break
-    return "\n".join(lines)
+    rows = [f"  0x{ea:x}  {name}" for _, _, ea, name in idautils.Entries()]
+    page_offset, page_limit = normalize_page(offset, limit)
+    next_offset = min(len(rows), page_offset + page_limit)
+    return format_page(
+        rows,
+        offset=offset,
+        limit=limit,
+        title="Exports",
+        next_hint=f"Call list_exports with offset={next_offset} limit={page_limit}.",
+    )
 
 
 @tool(category="database")
@@ -151,3 +193,28 @@ def read_bytes(
         ascii_str = "".join(ascii_parts)
         lines.append(f"  0x{row_ea:08x}  {hex_str}  |{ascii_str}|")
     return "\n".join(lines)
+
+
+@tool(category="database")
+def read_global_value(
+    address: Annotated[str, "Global/data address or symbol name"],
+    type_hint: Annotated[
+        str,
+        "auto, u8/i8/u16/i16/u32/i32/u64/i64, ptr, string, utf16, or bytes",
+    ] = "auto",
+    size: Annotated[int, "Bytes to inspect for auto/string/bytes; 0 selects a sensible default"] = 0,
+) -> str:
+    """Read and interpret a global variable or data value."""
+
+    ea = _resolve_addr_or_name(address)
+    pointer_size = _pointer_size()
+    read_size = bytes_needed_for_type(type_hint, pointer_size, requested_size=size)
+    data = _read_raw_bytes(ea, read_size)
+    return format_global_value(
+        address=ea,
+        data=data,
+        pointer_size=pointer_size,
+        type_hint=type_hint,
+        name=ida_name.get_name(ea) or "",
+        resolve_pointer=_resolve_pointer_name,
+    )
