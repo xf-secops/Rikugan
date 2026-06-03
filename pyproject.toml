@@ -1,3 +1,17 @@
+[project]
+name = "rikugan"
+version = "1.3.1"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic==0.103.1",
+    "openai==2.37.0",
+    "google-genai==2.4.0",
+    "mcp==1.27.1",
+    "tomli==2.4.1",
+    "cryptography==48.0.0",
+    "ida-domain==0.5.0",
+]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120
@@ -24,6 +38,8 @@ disallow_untyped_defs = true
 
 [dependency-groups]
 dev = [
-    "desloppify>=0.9.3",
+    "desloppify==0.9.3",
+    "mypy==2.1.0",
+    "pytest==9.0.3",
+    "ruff==0.15.13",
 ]
-

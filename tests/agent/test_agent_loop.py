@@ -7,6 +7,7 @@ import os
 import sys
 import unittest
 from typing import Any, Dict, List, Optional
+from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from tests.mocks.ida_mock import install_ida_mocks
@@ -22,7 +23,7 @@ from rikugan.agent.exploration_mode import ExplorationState
 from rikugan.agent.turn import TurnEventType
 from rikugan.tools.base import ParameterSchema, ToolDefinition
 from rikugan.tools.registry import ToolRegistry
-from rikugan.state.session import SessionState
+from rikugan.state.session import INTERNAL_EVENT_CANCELLED, INTERNAL_EVENT_KEY, SessionState
 from rikugan.providers.base import LLMProvider
 
 
@@ -58,7 +59,7 @@ class MockProvider(LLMProvider):
     def _normalize_response(self, raw):
         return raw
 
-    def _build_request_kwargs(self, messages, tools, temperature, max_tokens, system):
+    def _build_request_kwargs(self, messages, tools, system):
         return {}
 
     def _call_api(self, client, kwargs):
@@ -70,10 +71,10 @@ class MockProvider(LLMProvider):
     def _stream_chunks(self, client, kwargs):
         yield from ()
 
-    def chat(self, messages, tools=None, temperature=0.3, max_tokens=4096, system=""):
+    def chat(self, messages, tools=None, system=""):
         return Message(role=Role.ASSISTANT, content="mock response")
 
-    def chat_stream(self, messages, tools=None, temperature=0.3, max_tokens=4096, system=""):
+    def chat_stream(self, messages, tools=None, system=""):
         if self._call_count < len(self._responses):
             chunks = self._responses[self._call_count]
             self._call_count += 1
@@ -195,6 +196,18 @@ class TestAgentLoop(unittest.TestCase):
         tool_result = next(e for e in events if e.type == TurnEventType.TOOL_RESULT)
         self.assertTrue(tool_result.tool_is_error)
 
+    def test_cancel_aborts_provider_request(self):
+        """Cancel closes the provider's in-flight client/stream."""
+        provider = MockProvider(responses=[_text_response("Hello!")])
+        client = MagicMock()
+        provider._client = client
+        loop = self._make_loop(provider)
+
+        loop.cancel()
+
+        client.close.assert_called_once()
+        self.assertIsNone(provider._client)
+
     def test_cancellation_mid_tool_loop(self):
         """Cancel during a multi-turn tool loop."""
         registry = ToolRegistry()
@@ -223,6 +236,8 @@ class TestAgentLoop(unittest.TestCase):
         self.assertIn(TurnEventType.CANCELLED, types)
         # Should not reach the second response
         self.assertNotIn(TurnEventType.TEXT_DONE, types)
+        self.assertEqual(loop.session.messages[-1].metadata[INTERNAL_EVENT_KEY], INTERNAL_EVENT_CANCELLED)
+        self.assertEqual(loop.session.messages[-1].content, "Cancelled by user")
 
     def test_is_running_flag(self):
         provider = MockProvider(responses=[_text_response("Done")])

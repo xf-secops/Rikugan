@@ -272,8 +272,6 @@ def _make_settings():
     dlg._model_combo.count.return_value = 0
     dlg._model_status = MagicMock()
     dlg._fetch_btn = MagicMock()
-    dlg._context_spin = MagicMock()
-    dlg._max_tokens_spin = MagicMock()
     dlg._provider_combo = MagicMock()
     dlg._provider_combo.currentText.return_value = "anthropic"
     dlg._config = MagicMock()
@@ -281,7 +279,6 @@ def _make_settings():
     dlg._auth_status = MagicMock()
     dlg._api_key_edit = MagicMock()
     dlg._api_base_edit = MagicMock()
-    dlg._temp_spin = MagicMock()
     dlg._explore_turns_spin = MagicMock()
     dlg._auto_context_cb = MagicMock()
     dlg._auto_save_cb = MagicMock()

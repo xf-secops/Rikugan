@@ -9,19 +9,19 @@ set "SCRIPT_DIR=%~dp0"
 :: Remove trailing backslash
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 
-:: ── Sanity checks ────────────────────────────────────────────────────
+:: -- Sanity checks ----------------------------------------------------
 
 if not exist "%SCRIPT_DIR%\rikugan_plugin.py" (
-    echo [-] rikugan_plugin.py not found in %SCRIPT_DIR% — run this from the repo root
+    echo [-] rikugan_plugin.py not found in %SCRIPT_DIR% - run this from the repo root
     exit /b 1
 )
 
 if not exist "%SCRIPT_DIR%\rikugan\" (
-    echo [-] rikugan\ package not found in %SCRIPT_DIR% — run this from the repo root
+    echo [-] rikugan\ package not found in %SCRIPT_DIR% - run this from the repo root
     exit /b 1
 )
 
-:: ── Locate IDA user directory ────────────────────────────────────────
+:: -- Locate IDA user directory ---------------------------------------
 
 set "IDA_USER_DIR="
 
@@ -55,7 +55,7 @@ if not defined IDA_USER_DIR (
 set "PLUGINS_DIR=%IDA_USER_DIR%\plugins"
 set "CONFIG_DIR=%IDA_USER_DIR%\rikugan"
 
-:: ── Remove old "iris" installation (rebrand cleanup) ───────────────
+:: -- Remove old "iris" installation (rebrand cleanup) ---------------
 if exist "%PLUGINS_DIR%\iris_plugin.py" (
     echo [!] Removing old iris_plugin.py
     del "%PLUGINS_DIR%\iris_plugin.py"
@@ -74,7 +74,7 @@ if exist "%OLD_IRIS%\" (
     echo [+] Old 'iris' installation removed
 )
 
-:: ── Find IDA installation directory ──────────────────────────────────
+:: -- Find IDA installation directory ---------------------------------
 
 set "IDA_INSTALL_DIR="
 if defined IDADIR if exist "%IDADIR%\" set "IDA_INSTALL_DIR=%IDADIR%"
@@ -88,7 +88,7 @@ if not defined IDA_INSTALL_DIR (
     for /f "tokens=2*" %%A in ('reg query "HKLM\SOFTWARE\WOW6432Node\Hex-Rays\IDA" /v "Location" 2^>nul') do set "IDA_INSTALL_DIR=%%B"
 )
 
-:: ── Find IDA's Python ─────────────────────────────────────────────────
+:: -- Find IDA's Python -----------------------------------------------
 
 if not defined IDA_PYTHON if defined IDA_INSTALL_DIR (
     echo [*] IDA install dir: !IDA_INSTALL_DIR!
@@ -117,7 +117,7 @@ if not defined IDA_PYTHON if defined IDA_INSTALL_DIR (
     )
 )
 
-:: ── Install dependencies ─────────────────────────────────────────────
+:: -- Install dependencies --------------------------------------------
 
 echo [*] Installing Python dependencies...
 
@@ -150,12 +150,12 @@ echo [!] Rikugan will still be installed, but features tied to missing packages 
 
 :deps_ok
 
-:: ── Create directories ───────────────────────────────────────────────
+:: -- Create directories ----------------------------------------------
 
 if not exist "%PLUGINS_DIR%\" mkdir "%PLUGINS_DIR%"
 if not exist "%CONFIG_DIR%\"  mkdir "%CONFIG_DIR%"
 
-:: ── Copy built-in skills ────────────────────────────────────────────
+:: -- Copy built-in skills --------------------------------------------
 
 set "SKILLS_DIR=%CONFIG_DIR%\skills"
 set "BUILTINS_SRC=%SCRIPT_DIR%\rikugan\skills\builtins"
@@ -176,7 +176,7 @@ if exist "%BUILTINS_SRC%\" (
     echo [!] Built-in skills not found at %BUILTINS_SRC%, skipping
 )
 
-:: ── Install plugin (copy) ────────────────────────────────────────────
+:: -- Install plugin (copy) -------------------------------------------
 
 echo [*] Installing Rikugan into %PLUGINS_DIR%...
 
@@ -192,14 +192,14 @@ if !errorlevel! equ 0 (
     exit /b 1
 )
 
-:: rikugan/ package — use directory junction (symlink-like, no admin required)
+:: rikugan/ package - use directory junction (symlink-like, no admin required)
 if exist "%PLUGINS_DIR%\rikugan\" (
     :: Check if it's a junction
     fsutil reparsepoint query "%PLUGINS_DIR%\rikugan" >nul 2>&1
     if !errorlevel! equ 0 (
         rmdir "%PLUGINS_DIR%\rikugan"
     ) else (
-        :: Real directory — back it up
+        :: Real directory - back it up
         echo [!] Backing up existing rikugan\ to rikugan.bak\
         if exist "%PLUGINS_DIR%\rikugan.bak\" rmdir /s /q "%PLUGINS_DIR%\rikugan.bak"
         ren "%PLUGINS_DIR%\rikugan" "rikugan.bak"
@@ -221,7 +221,7 @@ if !errorlevel! equ 0 (
     )
 )
 
-:: ── Done ─────────────────────────────────────────────────────────────
+:: -- Done ------------------------------------------------------------
 
 echo.
 echo [+] Rikugan installed successfully!

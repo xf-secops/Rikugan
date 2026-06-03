@@ -7,7 +7,7 @@ For host capability flags see ``rikugan.core.host``.
 from __future__ import annotations
 
 PLUGIN_NAME = "Rikugan"
-PLUGIN_VERSION = "1.2.0"
+PLUGIN_VERSION = "1.3.1"
 PLUGIN_HOTKEY = "Ctrl+Shift+I"
 PLUGIN_COMMENT = "Intelligent Reverse-engineering Integrated System"
 
@@ -15,8 +15,6 @@ CONFIG_DIR_NAME = "rikugan"
 CONFIG_FILE_NAME = "config.json"
 CHECKPOINTS_DIR_NAME = "checkpoints"
 
-DEFAULT_MAX_TOKENS = 16384
-DEFAULT_TEMPERATURE = 0.2
 DEFAULT_CONTEXT_WINDOW = 200000
 
 TOOL_RESULT_TRUNCATE_LEN = 8000

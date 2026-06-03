@@ -163,12 +163,10 @@ class MiniMaxProvider(AnthropicProvider):
         self,
         messages,
         tools: list[dict[str, Any]] | None,
-        temperature: float,
-        max_tokens: int,
         system: str,
     ) -> dict[str, Any]:
         """Build request kwargs, stripping cache_control (not supported by MiniMax)."""
-        kwargs = super()._build_request_kwargs(messages, tools, temperature, max_tokens, system)
+        kwargs = super()._build_request_kwargs(messages, tools, system)
 
         # System prompt: strip cache_control from blocks
         if isinstance(kwargs.get("system"), list):

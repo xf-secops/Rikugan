@@ -165,15 +165,34 @@ class AnthropicProvider(LLMProvider):
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        ctx, max_output = self._model_limits(self.model)
         return ProviderCapabilities(
             streaming=True,
             tool_use=True,
             vision=True,
-            max_context_window=200000,
-            max_output_tokens=16384,
+            max_context_window=ctx,
+            max_output_tokens=max_output,
             supports_system_prompt=True,
             supports_cache_control=True,
         )
+
+    @staticmethod
+    def _model_limits(model_id: str) -> tuple[int, int]:
+        """Return conservative provider-owned context/output limits."""
+        model = model_id.lower()
+        if "sonnet-4" in model or "3-7-sonnet" in model:
+            return 200000, 64000
+        if "opus-4" in model:
+            return 200000, 32000
+        if "haiku-3" in model:
+            return 200000, 8192
+        return 200000, 8192
+
+    def context_window(self) -> int:
+        return self._model_limits(self.model)[0]
+
+    def _default_max_tokens(self) -> int:
+        return self._model_limits(self.model)[1]
 
     def _fetch_models_live(self) -> list[ModelInfo]:
         """Fetch models from the Anthropic API."""
@@ -184,9 +203,7 @@ class AnthropicProvider(LLMProvider):
             model_id = m.id
             display_name = getattr(m, "display_name", model_id)
             # API doesn't return context/output limits; use known defaults
-            is_opus = "opus" in model_id
-            ctx_window = 200000
-            max_output = 16384 if is_opus else 8192
+            ctx_window, max_output = self._model_limits(model_id)
             models.append(
                 ModelInfo(
                     id=model_id,
@@ -206,11 +223,20 @@ class AnthropicProvider(LLMProvider):
     def _builtin_models() -> list[ModelInfo]:
         return [
             ModelInfo(
+                "claude-opus-4-7",
+                "Claude Opus 4.7",
+                "anthropic",
+                200000,
+                32000,
+                True,
+                True,
+            ),
+            ModelInfo(
                 "claude-sonnet-4-6",
                 "Claude Sonnet 4.6",
                 "anthropic",
                 200000,
-                8192,
+                64000,
                 True,
                 True,
             ),
@@ -219,7 +245,7 @@ class AnthropicProvider(LLMProvider):
                 "Claude Opus 4.6",
                 "anthropic",
                 200000,
-                16384,
+                32000,
                 True,
                 True,
             ),
@@ -228,7 +254,7 @@ class AnthropicProvider(LLMProvider):
                 "Claude Opus 4",
                 "anthropic",
                 200000,
-                16384,
+                32000,
                 True,
                 True,
             ),
@@ -237,7 +263,7 @@ class AnthropicProvider(LLMProvider):
                 "Claude Sonnet 4",
                 "anthropic",
                 200000,
-                8192,
+                64000,
                 True,
                 True,
             ),
@@ -376,8 +402,6 @@ class AnthropicProvider(LLMProvider):
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None,
-        temperature: float,
-        max_tokens: int,
         system: str,
     ) -> dict[str, Any]:
         """Build kwargs dict for messages.create/stream."""
@@ -386,8 +410,7 @@ class AnthropicProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": formatted_messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            "max_tokens": self._default_max_tokens(),
         }
 
         # System prompt with cache_control for prompt caching
@@ -454,83 +477,84 @@ class AnthropicProvider(LLMProvider):
 
                 in_thinking = False
 
-                for event in stream:
-                    etype = event.type
+                with self._track_request_handle(stream):
+                    for event in stream:
+                        etype = event.type
 
-                    if etype == "content_block_start":
-                        block = event.content_block
-                        if block.type == "tool_use":
-                            current_tool_id = block.id
-                            current_tool_name = block.name
-                            tool_args_buf = ""
-                            yield StreamChunk(
-                                tool_call_id=block.id,
-                                tool_name=block.name,
-                                is_tool_call_start=True,
-                            )
-                        elif block.type == "thinking":
-                            in_thinking = True
-                            yield StreamChunk(text="<think>\n")
-                        elif block.type == "text":
-                            if block.text:
-                                yield StreamChunk(text=block.text)
+                        if etype == "content_block_start":
+                            block = event.content_block
+                            if block.type == "tool_use":
+                                current_tool_id = block.id
+                                current_tool_name = block.name
+                                tool_args_buf = ""
+                                yield StreamChunk(
+                                    tool_call_id=block.id,
+                                    tool_name=block.name,
+                                    is_tool_call_start=True,
+                                )
+                            elif block.type == "thinking":
+                                in_thinking = True
+                                yield StreamChunk(text="<think>\n")
+                            elif block.type == "text":
+                                if block.text:
+                                    yield StreamChunk(text=block.text)
 
-                    elif etype == "content_block_delta":
-                        delta = event.delta
-                        if delta.type == "thinking_delta":
-                            yield StreamChunk(text=delta.thinking)
-                        elif delta.type == "text_delta":
-                            yield StreamChunk(text=delta.text)
-                        elif delta.type == "input_json_delta":
-                            tool_args_buf += delta.partial_json
-                            yield StreamChunk(
-                                tool_call_id=current_tool_id,
-                                tool_name=current_tool_name,
-                                tool_args_delta=delta.partial_json,
-                            )
+                        elif etype == "content_block_delta":
+                            delta = event.delta
+                            if delta.type == "thinking_delta":
+                                yield StreamChunk(text=delta.thinking)
+                            elif delta.type == "text_delta":
+                                yield StreamChunk(text=delta.text)
+                            elif delta.type == "input_json_delta":
+                                tool_args_buf += delta.partial_json
+                                yield StreamChunk(
+                                    tool_call_id=current_tool_id,
+                                    tool_name=current_tool_name,
+                                    tool_args_delta=delta.partial_json,
+                                )
 
-                    elif etype == "content_block_stop":
-                        if in_thinking:
-                            yield StreamChunk(text="\n</think>\n")
-                            in_thinking = False
-                        elif current_tool_id:
-                            yield StreamChunk(
-                                tool_call_id=current_tool_id,
-                                tool_name=current_tool_name,
-                                tool_args_delta="",
-                                is_tool_call_end=True,
-                            )
-                            current_tool_id = None
-                            current_tool_name = None
-                            tool_args_buf = ""
+                        elif etype == "content_block_stop":
+                            if in_thinking:
+                                yield StreamChunk(text="\n</think>\n")
+                                in_thinking = False
+                            elif current_tool_id:
+                                yield StreamChunk(
+                                    tool_call_id=current_tool_id,
+                                    tool_name=current_tool_name,
+                                    tool_args_delta="",
+                                    is_tool_call_end=True,
+                                )
+                                current_tool_id = None
+                                current_tool_name = None
+                                tool_args_buf = ""
 
-                    elif etype == "message_delta":
-                        sr = getattr(event, "delta", None)
-                        if sr and hasattr(sr, "stop_reason"):
-                            yield StreamChunk(finish_reason=sr.stop_reason)
-                        # Capture final output_tokens from message_delta usage
-                        usage_delta = getattr(event, "usage", None)
-                        if usage_delta is not None:
-                            output_tokens = getattr(usage_delta, "output_tokens", 0) or 0
-                            if output_tokens > 0:
+                        elif etype == "message_delta":
+                            sr = getattr(event, "delta", None)
+                            if sr and hasattr(sr, "stop_reason"):
+                                yield StreamChunk(finish_reason=sr.stop_reason)
+                            # Capture final output_tokens from message_delta usage
+                            usage_delta = getattr(event, "usage", None)
+                            if usage_delta is not None:
+                                output_tokens = getattr(usage_delta, "output_tokens", 0) or 0
+                                if output_tokens > 0:
+                                    yield StreamChunk(
+                                        usage=TokenUsage(
+                                            prompt_tokens=0,
+                                            completion_tokens=output_tokens,
+                                        )
+                                    )
+
+                        elif etype == "message_start":
+                            msg = event.message
+                            if hasattr(msg, "usage"):
                                 yield StreamChunk(
                                     usage=TokenUsage(
-                                        prompt_tokens=0,
-                                        completion_tokens=output_tokens,
+                                        prompt_tokens=msg.usage.input_tokens,
+                                        completion_tokens=0,
+                                        cache_read_tokens=getattr(msg.usage, "cache_read_input_tokens", 0) or 0,
+                                        cache_creation_tokens=getattr(msg.usage, "cache_creation_input_tokens", 0) or 0,
                                     )
                                 )
-
-                    elif etype == "message_start":
-                        msg = event.message
-                        if hasattr(msg, "usage"):
-                            yield StreamChunk(
-                                usage=TokenUsage(
-                                    prompt_tokens=msg.usage.input_tokens,
-                                    completion_tokens=0,
-                                    cache_read_tokens=getattr(msg.usage, "cache_read_input_tokens", 0) or 0,
-                                    cache_creation_tokens=getattr(msg.usage, "cache_creation_input_tokens", 0) or 0,
-                                )
-                            )
 
         except Exception as e:
             log_error(f"AnthropicProvider.chat_stream error: {e}")

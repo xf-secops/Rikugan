@@ -7,6 +7,7 @@ import time
 
 from ..agent.turn import TurnEvent, TurnEventType
 from ..core.types import Message, Role
+from ..state.session import INTERNAL_EVENT_CANCELLED, INTERNAL_EVENT_KEY
 from .message_widgets import (
     AssistantMessageWidget,
     ErrorMessageWidget,
@@ -467,6 +468,9 @@ class ChatView(QScrollArea):
 
             elif msg.role == Role.ASSISTANT:
                 self._reset_tool_run()
+                if msg.metadata.get(INTERNAL_EVENT_KEY) == INTERNAL_EVENT_CANCELLED:
+                    self._insert_widget(ErrorMessageWidget("Cancelled by user", parent=self._container))
+                    continue
                 if msg.content:
                     w = AssistantMessageWidget(parent=self._container)
                     w.set_text(msg.content)

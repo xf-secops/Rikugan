@@ -257,12 +257,28 @@ class SessionControllerBase:
                 api_key=self.config.provider.api_key,
                 api_base=self.config.provider.api_base,
                 model=self.config.provider.model,
+                **(self.config.provider.extra or {}),
             )
             provider.ensure_ready()
             return provider
         except Exception as e:
             log_error(f"Provider creation failed: {e}")
             return None
+
+    def get_context_window(self) -> int:
+        """Return the active provider/model context window without UI-owned overrides."""
+        try:
+            provider = self._provider_registry.get_or_create(
+                self.config.provider.name,
+                api_key=self.config.provider.api_key,
+                api_base=self.config.provider.api_base,
+                model=self.config.provider.model,
+                **(self.config.provider.extra or {}),
+            )
+            return provider.context_window()
+        except Exception as e:
+            log_debug(f"Context window lookup failed: {e}")
+            return self.config.provider.context_window or 128000
 
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry."""
@@ -280,6 +296,7 @@ class SessionControllerBase:
                 api_key=self.config.provider.api_key,
                 api_base=self.config.provider.api_base,
                 model=self.config.provider.model,
+                **(self.config.provider.extra or {}),
             )
             provider.ensure_ready()
         except Exception as e:

@@ -93,10 +93,37 @@ class GeminiProvider(LLMProvider):
     def _builtin_models() -> list[ModelInfo]:
         return [
             ModelInfo(
-                "gemini-2.5-pro-preview-06-05",
+                "gemini-3-pro-preview",
+                "Gemini 3 Pro Preview",
+                "gemini",
+                1048576,
+                65536,
+                True,
+                True,
+            ),
+            ModelInfo(
+                "gemini-2.5-pro",
                 "Gemini 2.5 Pro",
                 "gemini",
-                1000000,
+                1048576,
+                65536,
+                True,
+                True,
+            ),
+            ModelInfo(
+                "gemini-2.5-flash",
+                "Gemini 2.5 Flash",
+                "gemini",
+                1048576,
+                65536,
+                True,
+                True,
+            ),
+            ModelInfo(
+                "gemini-2.5-flash-lite",
+                "Gemini 2.5 Flash-Lite",
+                "gemini",
+                1048576,
                 65536,
                 True,
                 True,
@@ -105,17 +132,8 @@ class GeminiProvider(LLMProvider):
                 "gemini-2.0-flash",
                 "Gemini 2.0 Flash",
                 "gemini",
-                1000000,
+                1048576,
                 8192,
-                True,
-                True,
-            ),
-            ModelInfo(
-                "gemini-2.5-flash-preview-05-20",
-                "Gemini 2.5 Flash",
-                "gemini",
-                1000000,
-                65536,
                 True,
                 True,
             ),
@@ -234,17 +252,12 @@ class GeminiProvider(LLMProvider):
 
     def _build_config(
         self,
-        temperature: float,
-        max_tokens: int,
         system: str,
         tools: list[dict[str, Any]] | None = None,
     ):
         """Build a ``GenerateContentConfig``."""
         types = self._types
-        kwargs: dict[str, Any] = {
-            "temperature": temperature,
-            "max_output_tokens": max_tokens,
-        }
+        kwargs: dict[str, Any] = {}
         if system:
             kwargs["system_instruction"] = system
         if tools:
@@ -256,15 +269,13 @@ class GeminiProvider(LLMProvider):
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None,
-        temperature: float,
-        max_tokens: int,
         system: str,
     ) -> dict[str, Any]:
         """Build kwargs dict for Gemini generate_content / generate_content_stream."""
         return {
             "model": self.model,
             "contents": self._build_contents(messages),
-            "config": self._build_config(temperature, max_tokens, system, tools),
+            "config": self._build_config(system, tools),
         }
 
     def _call_api(self, client: Any, kwargs: dict[str, Any]) -> Any:
@@ -314,44 +325,46 @@ class GeminiProvider(LLMProvider):
             all_raw_parts: list = []
             last_usage: TokenUsage | None = None
             _in_thought = False
-            for chunk in client.models.generate_content_stream(**kwargs):
-                if not chunk.candidates or not chunk.candidates[0].content:
-                    continue
-                parts = chunk.candidates[0].content.parts
-                if not parts:
-                    continue
-                for part in parts:
-                    all_raw_parts.append(part)
-                    if part.text:
-                        is_thought = getattr(part, "thought", False)
-                        if is_thought and not _in_thought:
-                            yield StreamChunk(text="<think>")
-                            _in_thought = True
-                        elif not is_thought and _in_thought:
-                            yield StreamChunk(text="</think>\n")
-                            _in_thought = False
-                        yield StreamChunk(text=part.text)
-                    if part.function_call:
-                        fc = part.function_call
-                        call_id = ToolCall.make_id()
-                        yield StreamChunk(
-                            tool_call_id=call_id,
-                            tool_name=fc.name,
-                            tool_args_delta=json.dumps(dict(fc.args) if fc.args else {}),
-                            is_tool_call_start=True,
+            stream = client.models.generate_content_stream(**kwargs)
+            with self._track_request_handle(stream):
+                for chunk in stream:
+                    if not chunk.candidates or not chunk.candidates[0].content:
+                        continue
+                    parts = chunk.candidates[0].content.parts
+                    if not parts:
+                        continue
+                    for part in parts:
+                        all_raw_parts.append(part)
+                        if part.text:
+                            is_thought = getattr(part, "thought", False)
+                            if is_thought and not _in_thought:
+                                yield StreamChunk(text="<think>")
+                                _in_thought = True
+                            elif not is_thought and _in_thought:
+                                yield StreamChunk(text="</think>\n")
+                                _in_thought = False
+                            yield StreamChunk(text=part.text)
+                        if part.function_call:
+                            fc = part.function_call
+                            call_id = ToolCall.make_id()
+                            yield StreamChunk(
+                                tool_call_id=call_id,
+                                tool_name=fc.name,
+                                tool_args_delta=json.dumps(dict(fc.args) if fc.args else {}),
+                                is_tool_call_start=True,
+                            )
+                            yield StreamChunk(
+                                tool_call_id=call_id,
+                                tool_name=fc.name,
+                                is_tool_call_end=True,
+                            )
+                    if chunk.usage_metadata:
+                        um = chunk.usage_metadata
+                        last_usage = TokenUsage(
+                            prompt_tokens=getattr(um, "prompt_token_count", 0) or 0,
+                            completion_tokens=getattr(um, "candidates_token_count", 0) or 0,
+                            total_tokens=getattr(um, "total_token_count", 0) or 0,
                         )
-                        yield StreamChunk(
-                            tool_call_id=call_id,
-                            tool_name=fc.name,
-                            is_tool_call_end=True,
-                        )
-                if chunk.usage_metadata:
-                    um = chunk.usage_metadata
-                    last_usage = TokenUsage(
-                        prompt_tokens=getattr(um, "prompt_token_count", 0) or 0,
-                        completion_tokens=getattr(um, "candidates_token_count", 0) or 0,
-                        total_tokens=getattr(um, "total_token_count", 0) or 0,
-                    )
             if _in_thought:
                 yield StreamChunk(text="</think>\n")
             yield StreamChunk(

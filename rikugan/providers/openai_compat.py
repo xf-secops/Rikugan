@@ -20,11 +20,15 @@ class OpenAICompatProvider(OpenAIProvider):
         api_base: str = "",
         model: str = "",
         provider_name: str = "openai_compat",
+        context_window: int = 128000,
+        max_output_tokens: int = 4096,
         **kwargs,
     ):
         super().__init__(api_key=api_key, model=model, **kwargs)
         self.api_base = api_base
         self._provider_name = provider_name
+        self._context_window = context_window
+        self._max_output_tokens = max_output_tokens
 
     def _get_client(self):
         if self._client is None:
@@ -57,9 +61,12 @@ class OpenAICompatProvider(OpenAIProvider):
             streaming=True,
             tool_use=True,
             vision=False,
-            max_context_window=200000,
-            max_output_tokens=16384,
+            max_context_window=self._context_window,
+            max_output_tokens=self._max_output_tokens,
         )
+
+    def context_window(self) -> int:
+        return self._context_window
 
     def list_models(self) -> list[ModelInfo]:
         """Fetch models from the OpenAI-compatible endpoint."""
@@ -74,6 +81,8 @@ class OpenAICompatProvider(OpenAIProvider):
                         id=m.id,
                         name=name,
                         provider=self._provider_name,
+                        context_window=self._context_window,
+                        max_output_tokens=self._max_output_tokens,
                     )
                 )
             if models:
@@ -84,5 +93,13 @@ class OpenAICompatProvider(OpenAIProvider):
         # Endpoint doesn't support /v1/models or returned nothing.
         # Return current model if set; otherwise empty (user types manually).
         if self.model:
-            return [ModelInfo(self.model, self.model, self._provider_name)]
+            return [
+                ModelInfo(
+                    self.model,
+                    self.model,
+                    self._provider_name,
+                    context_window=self._context_window,
+                    max_output_tokens=self._max_output_tokens,
+                )
+            ]
         return []

@@ -38,6 +38,13 @@ class TestBuiltinModels(unittest.TestCase):
         for m in models:
             self.assertEqual(m.provider, "openai")
 
+    def test_codex_builtin_models(self):
+        from rikugan.providers.codex_provider import CodexProvider
+        models = CodexProvider._builtin_models()
+        self.assertTrue(len(models) > 0)
+        for m in models:
+            self.assertEqual(m.provider, "codex")
+
     def test_gemini_builtin_models(self):
         from rikugan.providers.gemini_provider import GeminiProvider
         models = GeminiProvider._builtin_models()
@@ -72,6 +79,32 @@ class TestProviderCapabilities(unittest.TestCase):
         caps = p.capabilities
         self.assertTrue(caps.streaming)
         self.assertTrue(caps.tool_use)
+
+
+class TestProviderRequestDefaults(unittest.TestCase):
+    """Providers own request defaults; user-facing generation knobs stay out."""
+
+    def test_openai_omits_generation_knobs(self):
+        from rikugan.core.types import Message, Role
+        from rikugan.providers.openai_provider import OpenAIProvider
+
+        p = OpenAIProvider(api_key="test", model="gpt-4o")
+        kwargs = p._build_request_kwargs([Message(role=Role.USER, content="hi")], tools=None, system="")
+
+        self.assertNotIn("temperature", kwargs)
+        self.assertNotIn("max_tokens", kwargs)
+        self.assertNotIn("max_completion_tokens", kwargs)
+
+    def test_anthropic_keeps_required_provider_max_tokens(self):
+        _reload_anthropic_provider_module()
+        from rikugan.core.types import Message, Role
+        from rikugan.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(api_key="test", model="claude-opus-4-7")
+        kwargs = p._build_request_kwargs([Message(role=Role.USER, content="hi")], tools=None, system="")
+
+        self.assertEqual(kwargs["max_tokens"], 32000)
+        self.assertNotIn("temperature", kwargs)
 
 
 if __name__ == "__main__":

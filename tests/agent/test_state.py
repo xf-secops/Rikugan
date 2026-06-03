@@ -14,7 +14,7 @@ from tests.mocks.ida_mock import install_ida_mocks
 install_ida_mocks()
 
 from rikugan.core.types import Message, Role, TokenUsage, ToolCall, ToolResult
-from rikugan.state.session import SessionState
+from rikugan.state.session import INTERNAL_EVENT_CANCELLED, INTERNAL_EVENT_KEY, SessionState
 from rikugan.state.history import SessionHistory
 from rikugan.core.config import RikuganConfig
 
@@ -72,6 +72,22 @@ class TestSessionState(unittest.TestCase):
         msgs.append(Message(role=Role.USER, content="c"))
         self.assertEqual(len(s.messages), 2)
 
+    def test_internal_event_messages_excluded_from_provider_context(self):
+        s = SessionState()
+        s.add_message(Message(role=Role.USER, content="a"))
+        s.add_message(
+            Message(
+                role=Role.ASSISTANT,
+                content="Cancelled by user",
+                metadata={INTERNAL_EVENT_KEY: INTERNAL_EVENT_CANCELLED},
+            )
+        )
+        s.add_message(Message(role=Role.USER, content="b"))
+
+        msgs = s.get_messages_for_provider()
+
+        self.assertEqual([m.content for m in msgs], ["a", "b"])
+
     def test_message_count(self):
         s = SessionState()
         self.assertEqual(s.message_count(), 0)
@@ -109,6 +125,15 @@ class TestMessageSerialization(unittest.TestCase):
         restored = [Message.from_dict(d) for d in json.loads(data)]
         self.assertEqual(restored[0].tool_results[0].content, "int main() {}")
         self.assertFalse(restored[0].tool_results[0].is_error)
+
+    def test_metadata_roundtrip(self):
+        msg = Message(
+            role=Role.ASSISTANT,
+            content="Cancelled by user",
+            metadata={INTERNAL_EVENT_KEY: INTERNAL_EVENT_CANCELLED},
+        )
+        restored = Message.from_dict(msg.to_dict())
+        self.assertEqual(restored.metadata[INTERNAL_EVENT_KEY], INTERNAL_EVENT_CANCELLED)
 
 
 class TestSessionHistory(unittest.TestCase):

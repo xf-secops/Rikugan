@@ -20,7 +20,7 @@ jobs:
           cache: pip
 
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff==0.15.13
 
       - name: Format check
         run: python -m ruff format --check rikugan/
@@ -40,7 +40,7 @@ jobs:
           cache: pip
 
       - name: Install deps
-        run: pip install mypy tomli
+        run: pip install mypy==2.1.0 tomli==2.4.1
 
       - name: Type check (core + providers)
         run: python -m mypy rikugan/core rikugan/providers  # config in pyproject.toml
@@ -57,7 +57,7 @@ jobs:
           cache: pip
 
       - name: Install deps
-        run: pip install pytest tomli
+        run: pip install pytest==9.0.3 tomli==2.4.1
 
       - name: Run tests
         run: python -m pytest tests/ --tb=short -q
@@ -76,7 +76,7 @@ jobs:
           cache: pip
 
       - name: Install desloppify
-        run: pip install desloppify
+        run: pip install desloppify==0.9.3
 
       - name: Run objective scan
         run: desloppify scan --profile objective --no-badge

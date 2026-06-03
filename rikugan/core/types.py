@@ -60,6 +60,7 @@ class Message:
     timestamp: float = field(default_factory=time.time)
     token_usage: TokenUsage | None = None
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    metadata: dict[str, Any] = field(default_factory=dict)
     # Provider-specific raw response data (e.g. Gemini parts with thought_signatures).
     # Not serialized to JSON — only kept in-memory for the current session.
     _raw_parts: Any = field(default=None, repr=False)
@@ -96,6 +97,8 @@ class Message:
                 "cache_read_tokens": self.token_usage.cache_read_tokens,
                 "cache_creation_tokens": self.token_usage.cache_creation_tokens,
             }
+        if self.metadata:
+            d["metadata"] = self.metadata
         return d
 
     @classmethod
@@ -132,6 +135,7 @@ class Message:
             timestamp=d.get("timestamp", time.time()),
             token_usage=usage,
             id=d.get("id", uuid.uuid4().hex[:12]),
+            metadata=dict(d.get("metadata", {})),
         )
 
 
