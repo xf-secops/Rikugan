@@ -539,7 +539,8 @@ class CodexProvider(LLMProvider):
     def _stream_chunks(self, client: Any, kwargs: dict[str, Any]) -> Generator[StreamChunk, None, None]:
         try:
             response = self._request("POST", "responses", kwargs, stream=True)
-            yield from self._iter_sse(response)
+            with self._track_request_handle(response):
+                yield from self._iter_sse(response)
         except Exception as e:
             self._handle_api_error(e)
 

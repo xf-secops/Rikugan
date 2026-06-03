@@ -29,7 +29,7 @@ from ..core.sanitize import (
 from ..core.types import Message, Role, TokenUsage, ToolCall, ToolResult
 from ..providers.base import LLMProvider
 from ..skills.registry import SkillRegistry
-from ..state.session import SessionState
+from ..state.session import INTERNAL_EVENT_CANCELLED, INTERNAL_EVENT_KEY, SessionState
 from ..tools.registry import ToolRegistry
 from .context_window import ContextWindowManager
 from .exploration_mode import (
@@ -440,6 +440,12 @@ class AgentLoop:
     def cancel(self) -> None:
         """Cancel the current run."""
         self._cancelled.set()
+        cancel_request = getattr(self.provider, "cancel_current_request", None)
+        if callable(cancel_request):
+            try:
+                cancel_request()
+            except Exception as e:
+                log_debug(f"Provider request abort failed: {e}")
 
     def _drain_queue(self, q: queue.Queue[str]) -> None:
         """Remove any stale item from a maxsize=1 queue (non-blocking)."""
@@ -462,6 +468,19 @@ class AgentLoop:
     def _check_cancelled(self) -> None:
         if self._cancelled.is_set():
             raise CancellationError("Agent run cancelled")
+
+    def _record_cancelled_message(self) -> None:
+        """Persist a UI-only cancellation marker for restored chat history."""
+        last = self.session.messages[-1] if self.session.messages else None
+        if last and last.metadata.get(INTERNAL_EVENT_KEY) == INTERNAL_EVENT_CANCELLED:
+            return
+        self.session.add_message(
+            Message(
+                role=Role.ASSISTANT,
+                content="Cancelled by user",
+                metadata={INTERNAL_EVENT_KEY: INTERNAL_EVENT_CANCELLED},
+            )
+        )
 
     def _wait_for_queue(self, q: queue.Queue[str]) -> str:
         """Block until a value arrives on `q`, checking for cancellation."""
@@ -739,6 +758,8 @@ class AgentLoop:
                 result = yield from self._stream_llm_turn_inner(system_prompt, tools_schema)
                 return result
             except (RateLimitError, ProviderError) as e:
+                if self._cancelled.is_set():
+                    raise CancellationError("Agent run cancelled") from e
                 is_rate_limit = isinstance(e, RateLimitError)
                 if not is_rate_limit and not (e.retryable and attempt < max_retries - 1):
                     raise
@@ -1550,6 +1571,7 @@ class AgentLoop:
             yield from run_normal_loop(self, system_prompt, tools_schema)
 
         except CancellationError:
+            self._record_cancelled_message()
             yield TurnEvent.cancelled_event()
         except Exception as e:
             log_error(f"Agent loop error: {e}\n{traceback.format_exc()}")

@@ -233,69 +233,70 @@ class OpenAIProvider(LLMProvider):
 
             _in_reasoning = False
 
-            for chunk in stream:
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
+            with self._track_request_handle(stream):
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
 
-                # OpenAI o-series reasoning_content
-                reasoning = getattr(delta, "reasoning_content", None)
-                if reasoning:
-                    if not _in_reasoning:
-                        yield StreamChunk(text="<think>")
-                        _in_reasoning = True
-                    yield StreamChunk(text=reasoning)
-                elif _in_reasoning:
-                    yield StreamChunk(text="</think>\n")
-                    _in_reasoning = False
-
-                if delta.content:
-                    yield StreamChunk(text=delta.content)
-
-                if delta.tool_calls:
-                    for tc_delta in delta.tool_calls:
-                        idx = tc_delta.index
-                        if idx not in current_tool_calls:
-                            current_tool_calls[idx] = {
-                                "id": tc_delta.id or "",
-                                "name": tc_delta.function.name if tc_delta.function and tc_delta.function.name else "",
-                                "args": "",
-                            }
-                            if tc_delta.id:
-                                yield StreamChunk(
-                                    tool_call_id=tc_delta.id,
-                                    tool_name=tc_delta.function.name if tc_delta.function else "",
-                                    is_tool_call_start=True,
-                                )
-
-                        if tc_delta.function and tc_delta.function.arguments:
-                            current_tool_calls[idx]["args"] += tc_delta.function.arguments
-                            yield StreamChunk(
-                                tool_call_id=current_tool_calls[idx]["id"],
-                                tool_name=current_tool_calls[idx]["name"],
-                                tool_args_delta=tc_delta.function.arguments,
-                            )
-
-                if chunk.choices[0].finish_reason:
-                    if _in_reasoning:
+                    # OpenAI o-series reasoning_content
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    if reasoning:
+                        if not _in_reasoning:
+                            yield StreamChunk(text="<think>")
+                            _in_reasoning = True
+                        yield StreamChunk(text=reasoning)
+                    elif _in_reasoning:
                         yield StreamChunk(text="</think>\n")
                         _in_reasoning = False
-                    for tc_info in current_tool_calls.values():
-                        yield StreamChunk(
-                            tool_call_id=tc_info["id"],
-                            tool_name=tc_info["name"],
-                            is_tool_call_end=True,
-                        )
-                    yield StreamChunk(finish_reason=chunk.choices[0].finish_reason)
 
-                if chunk.usage:
-                    yield StreamChunk(
-                        usage=TokenUsage(
-                            prompt_tokens=chunk.usage.prompt_tokens,
-                            completion_tokens=chunk.usage.completion_tokens,
-                            total_tokens=chunk.usage.total_tokens,
+                    if delta.content:
+                        yield StreamChunk(text=delta.content)
+
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in current_tool_calls:
+                                current_tool_calls[idx] = {
+                                    "id": tc_delta.id or "",
+                                    "name": tc_delta.function.name if tc_delta.function and tc_delta.function.name else "",
+                                    "args": "",
+                                }
+                                if tc_delta.id:
+                                    yield StreamChunk(
+                                        tool_call_id=tc_delta.id,
+                                        tool_name=tc_delta.function.name if tc_delta.function else "",
+                                        is_tool_call_start=True,
+                                    )
+
+                            if tc_delta.function and tc_delta.function.arguments:
+                                current_tool_calls[idx]["args"] += tc_delta.function.arguments
+                                yield StreamChunk(
+                                    tool_call_id=current_tool_calls[idx]["id"],
+                                    tool_name=current_tool_calls[idx]["name"],
+                                    tool_args_delta=tc_delta.function.arguments,
+                                )
+
+                    if chunk.choices[0].finish_reason:
+                        if _in_reasoning:
+                            yield StreamChunk(text="</think>\n")
+                            _in_reasoning = False
+                        for tc_info in current_tool_calls.values():
+                            yield StreamChunk(
+                                tool_call_id=tc_info["id"],
+                                tool_name=tc_info["name"],
+                                is_tool_call_end=True,
+                            )
+                        yield StreamChunk(finish_reason=chunk.choices[0].finish_reason)
+
+                    if chunk.usage:
+                        yield StreamChunk(
+                            usage=TokenUsage(
+                                prompt_tokens=chunk.usage.prompt_tokens,
+                                completion_tokens=chunk.usage.completion_tokens,
+                                total_tokens=chunk.usage.total_tokens,
+                            )
                         )
-                    )
 
         except Exception as e:
             self._handle_api_error(e)

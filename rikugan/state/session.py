@@ -20,10 +20,14 @@ _CHARS_PER_TOKEN = 3.5
 _OLD_RESULT_THRESHOLD = 8
 _OLD_RESULT_MAX_CHARS = 500
 _RECENT_RESULT_MAX_CHARS = 8000
+INTERNAL_EVENT_KEY = "rikugan_event"
+INTERNAL_EVENT_CANCELLED = "cancelled"
 
 
 def _estimate_tokens(msg: Message) -> int:
     """Rough token count estimate from message text content."""
+    if msg.metadata.get(INTERNAL_EVENT_KEY):
+        return 0
     chars = len(msg.content or "")
     for tc in msg.tool_calls:
         chars += len(tc.name) + 50
@@ -144,6 +148,7 @@ class SessionState:
         """
         with self._lock:
             snapshot = list(self.messages)
+        snapshot = [msg for msg in snapshot if not msg.metadata.get(INTERNAL_EVENT_KEY)]
         sanitized = self._sanitize(snapshot)
         sanitized = self._sanitize_assistant_output(sanitized)
         if not preserve_context:

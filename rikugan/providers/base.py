@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any, NoReturn
 
 from ..core.logging import log_debug
@@ -38,6 +40,8 @@ class LLMProvider(ABC):
         self.api_base = api_base
         self.model = model
         self._client: Any = None
+        self._active_request_handles: list[Any] = []
+        self._request_lock = threading.RLock()
 
     # -- Abstract interface ----------------------------------------------------
 
@@ -202,3 +206,47 @@ class LLMProvider(ABC):
         except Exception as e:
             log_debug(f"validate_key failed for {self.name}: {e}")
             return False
+
+    @contextmanager
+    def _track_request_handle(self, handle: Any) -> Generator[Any, None, None]:
+        """Register an in-flight request object that can be closed on cancel."""
+        if handle is None:
+            yield handle
+            return
+        with self._request_lock:
+            self._active_request_handles.append(handle)
+        try:
+            yield handle
+        finally:
+            with self._request_lock:
+                try:
+                    self._active_request_handles.remove(handle)
+                except ValueError:
+                    pass
+
+    def cancel_current_request(self) -> None:
+        """Best-effort abort for an in-flight provider request.
+
+        Cooperative cancellation only runs between chunks. Closing the active
+        stream/client here lets the UI Stop button interrupt SDK or HTTP reads
+        that are blocked waiting for the server.
+        """
+        with self._request_lock:
+            handles = list(self._active_request_handles)
+            client = self._client
+            self._client = None
+
+        for handle in handles:
+            self._close_request_handle(handle)
+        self._close_request_handle(client)
+
+    def _close_request_handle(self, handle: Any) -> None:
+        if handle is None:
+            return
+        close = getattr(handle, "close", None)
+        if not callable(close):
+            return
+        try:
+            close()
+        except Exception as exc:
+            log_debug(f"{self.name} request abort via close failed: {exc}")
