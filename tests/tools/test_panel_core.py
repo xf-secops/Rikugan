@@ -119,6 +119,8 @@ from rikugan.ui.panel_core import (  # noqa: E402
     _export_detect_lang,
     _export_format_tool_args,
     _export_format_tool_result,
+    _parse_function_info_result,
+    _parse_function_page,
 )
 
 # ---------------------------------------------------------------------------
@@ -180,6 +182,40 @@ class TestExportDetectLang(unittest.TestCase):
         # arg_key check comes first
         result = _export_detect_lang("x", tool_name="execute_python", arg_key="c_code")
         self.assertEqual(result, "c")
+
+
+class TestParseFunctionPage(unittest.TestCase):
+    def test_parses_total_and_rows(self):
+        raw = "Functions 250-252 of 1000:\n  0x401000  sub_401000\n  0x401050  main\n"
+        functions, total = _parse_function_page(raw)
+
+        self.assertEqual(total, 1000)
+        self.assertEqual(
+            functions,
+            [
+                {"address": 0x401000, "name": "sub_401000", "is_import": False, "instruction_count": 0},
+                {"address": 0x401050, "name": "main", "is_import": False, "instruction_count": 0},
+            ],
+        )
+
+    def test_parses_unknown_total(self):
+        raw = "Functions 0-1 of unknown:\n  0x10  start\n"
+        _functions, total = _parse_function_page(raw)
+        self.assertEqual(total, "unknown")
+
+
+class TestParseFunctionInfoResult(unittest.TestCase):
+    def test_parses_function_info_summary(self):
+        raw = "Name: main\nAddress: 0x401000 \u2013 0x401050\nSize: 80 bytes\nInstructions: 12\n"
+        function = _parse_function_info_result(raw)
+
+        self.assertEqual(
+            function,
+            {"address": 0x401000, "name": "main", "is_import": False, "instruction_count": 12},
+        )
+
+    def test_ignores_no_function_result(self):
+        self.assertIsNone(_parse_function_info_result("No function at 0x401000"))
 
 
 # ---------------------------------------------------------------------------

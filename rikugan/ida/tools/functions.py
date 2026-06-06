@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterable
+from itertools import islice
 from typing import Annotated
 
 from ...core.logging import log_debug
@@ -51,15 +53,38 @@ def list_functions(
 ) -> str:
     """List functions in the binary with pagination."""
 
-    funcs = list(idautils.Functions())
-    total = len(funcs)
-    page = funcs[offset : offset + limit]
+    offset = max(0, int(offset))
+    limit = max(1, int(limit))
+    page, total = _paged_function_addresses(offset, limit)
 
     lines = [f"Functions {offset}\u2013{offset + len(page)} of {total}:"]
     for ea in page:
         name = ida_name.get_name(ea)
         lines.append(f"  0x{ea:x}  {name}")
     return "\n".join(lines)
+
+
+def _paged_function_addresses(offset: int, limit: int) -> tuple[list[int], int | str]:
+    """Return one page of function addresses without materializing all functions."""
+    try:
+        qty = ida_funcs.get_func_qty()
+    except (AttributeError, TypeError):
+        qty = None
+
+    if isinstance(qty, int) and qty >= 0:
+        end = min(qty, offset + limit)
+        page: list[int] = []
+        for idx in range(offset, end):
+            func = ida_funcs.getn_func(idx)
+            if func is not None:
+                page.append(int(func.start_ea))
+        return page, qty
+
+    funcs: Iterable[int] = iter(idautils.Functions())
+    page = [int(ea) for ea in islice(funcs, offset, offset + limit)]
+    # Older/test environments may not expose get_func_qty(); count only there.
+    total = offset + len(page) + sum(1 for _ in funcs)
+    return page, total
 
 
 @tool(category="functions")

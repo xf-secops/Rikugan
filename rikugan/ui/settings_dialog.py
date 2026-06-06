@@ -369,16 +369,6 @@ class SettingsDialog(QDialog):
         provider_group = QGroupBox("LLM Provider")
         provider_form = QFormLayout(provider_group)
 
-        warnings = self._registry.dependency_warnings()
-        self._dependency_label = QLabel()
-        self._dependency_label.setWordWrap(True)
-        self._dependency_label.setStyleSheet(maybe_host_stylesheet("color: #f5d98b; font-size: 11px;"))
-        if warnings:
-            self._dependency_label.setText("Warnings: " + " ".join(warnings))
-            provider_form.addRow(self._dependency_label)
-        else:
-            self._dependency_label.hide()
-
         provider_form.addRow("Provider:", self._build_provider_row())
 
         # API key — only show explicit user keys, NOT auto-resolved OAuth tokens

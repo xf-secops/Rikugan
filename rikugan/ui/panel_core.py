@@ -81,6 +81,56 @@ _SANITIZER_WRAP_RE = re.compile(
     r"<(?:tool_result|mcp_result|binary_data|persistent_memory|skill)\b[^>]*>\n?"
     r"|</(?:tool_result|mcp_result|binary_data|persistent_memory|skill)>\n?",
 )
+_FUNCTION_PAGE_HEADER_RE = re.compile(r"^Functions\s+\d+[\-\u2013]\d+\s+of\s+([^:]+):")
+_FUNCTION_ROW_RE = re.compile(r"\s*0x([0-9a-fA-F]+)\s+(.+)")
+_FUNCTION_INFO_NAME_RE = re.compile(r"^Name:\s+(.+)$", re.MULTILINE)
+_FUNCTION_INFO_ADDRESS_RE = re.compile(r"^Address:\s+0x([0-9a-fA-F]+)", re.MULTILINE)
+_FUNCTION_INFO_INSTRUCTIONS_RE = re.compile(r"^Instructions:\s+(\d+)", re.MULTILINE)
+_HEX_ADDRESS_QUERY_RE = re.compile(r"0x[0-9a-fA-F]+")
+
+
+def _parse_function_page(raw: str) -> tuple[list[dict], int | str | None]:
+    """Parse a list_functions page into renamer rows and an optional total hint."""
+    functions = []
+    total_hint: int | str | None = None
+    for line in raw.splitlines():
+        header = _FUNCTION_PAGE_HEADER_RE.match(line)
+        if header:
+            total_text = header.group(1).strip()
+            try:
+                total_hint = int(total_text)
+            except ValueError:
+                total_hint = total_text or None
+            continue
+
+        match = _FUNCTION_ROW_RE.match(line)
+        if match:
+            functions.append(
+                {
+                    "address": int(match.group(1), 16),
+                    "name": match.group(2).strip(),
+                    "is_import": False,
+                    "instruction_count": 0,
+                }
+            )
+    return functions, total_hint
+
+
+def _parse_function_info_result(raw: str) -> dict | None:
+    """Parse get_function_info output into one renamer row."""
+    name_match = _FUNCTION_INFO_NAME_RE.search(raw)
+    address_match = _FUNCTION_INFO_ADDRESS_RE.search(raw)
+    if not name_match or not address_match:
+        return None
+
+    instructions_match = _FUNCTION_INFO_INSTRUCTIONS_RE.search(raw)
+    instruction_count = int(instructions_match.group(1)) if instructions_match else 0
+    return {
+        "address": int(address_match.group(1), 16),
+        "name": name_match.group(1).strip(),
+        "is_import": False,
+        "instruction_count": instruction_count,
+    }
 
 
 def _strip_sanitizer_tags(text: str) -> str:
@@ -707,22 +757,6 @@ class RikuganPanelCore(QWidget):
         # Stacked content: page 0 = chat, page 1 = tools
         self._mode_stack = QStackedWidget()
         layout.addWidget(self._mode_stack, 1)
-
-        self._dependency_banner = QLabel()
-        self._dependency_banner.setObjectName("dependency_banner")
-        self._dependency_banner.setWordWrap(True)
-        self._dependency_banner.setStyleSheet(
-            maybe_host_stylesheet(
-                "QLabel#dependency_banner {"
-                "background: #4b3900; color: #f5d98b; border-top: 1px solid #6b5000; "
-                "border-bottom: 1px solid #6b5000; padding: 6px 8px; font-size: 11px; }"
-            )
-        )
-        if self._dependency_warnings:
-            self._dependency_banner.setText("Warnings: " + " ".join(self._dependency_warnings))
-            layout.insertWidget(1, self._dependency_banner)
-        else:
-            self._dependency_banner.hide()
 
         # --- Page 0: Chat ---
         chat_page = QWidget()
@@ -1682,6 +1716,8 @@ class RikuganPanelCore(QWidget):
         self._bulk_renamer.cancel_requested.connect(self._on_renamer_cancel)
         self._bulk_renamer.undo_requested.connect(self._on_renamer_undo)
         self._bulk_renamer.seek_requested.connect(lambda addr: self._on_renamer_seek(addr))
+        self._bulk_renamer.load_more_requested.connect(self._on_renamer_load_more)
+        self._bulk_renamer.search_requested.connect(self._on_renamer_search)
         self._tools_panel.set_renamer_widget(self._bulk_renamer)
 
         # Create IDA dockable form wrapper if factory is available
@@ -1750,22 +1786,31 @@ class RikuganPanelCore(QWidget):
             log_info("list_functions tool not available — renamer table will be empty")
             return
 
-        # State for the incremental page fetcher
-        self._renamer_load_funcs: list[dict] = []
+        # State for the incremental page fetcher. The widget requests more
+        # pages as needed; do not walk the whole function list up front.
         self._renamer_load_offset = 0
-        self._renamer_load_batch = 500
+        self._renamer_load_batch = 250
         self._renamer_load_defn = defn
+        self._renamer_load_total: int | str | None = None
+        self._renamer_loading_page = False
+        self._bulk_renamer.begin_function_load()
+        QTimer.singleShot(0, self._fetch_renamer_page)
 
-        self._renamer_fetch_timer = QTimer(self)
-        self._renamer_fetch_timer.setInterval(0)
-        self._renamer_fetch_timer.timeout.connect(self._fetch_renamer_page)
-        self._renamer_fetch_timer.start()
+    def _on_renamer_load_more(self) -> None:
+        """Fetch the next function page when the renamer asks for it."""
+        if getattr(self, "_renamer_loading_page", False):
+            return
+        if getattr(self, "_renamer_load_defn", None) is None:
+            return
+        QTimer.singleShot(0, self._fetch_renamer_page)
 
     def _fetch_renamer_page(self) -> None:
-        """Fetch one page of functions and schedule the next or finish."""
+        """Fetch one function page and append it to the renamer table."""
         defn = self._renamer_load_defn
         offset = self._renamer_load_offset
         batch = self._renamer_load_batch
+        self._renamer_loading_page = True
+        self._bulk_renamer.set_function_page_loading(True)
 
         try:
             raw = defn.handler(offset=offset, limit=batch)
@@ -1773,46 +1818,69 @@ class RikuganPanelCore(QWidget):
             log_error(f"list_functions failed at offset {offset}: {e}")
             raw = None
 
-        page_count = 0
-        if raw:
-            for line in raw.splitlines():
-                m = re.match(r"\s*0x([0-9a-fA-F]+)\s+(.+)", line)
-                if m:
-                    self._renamer_load_funcs.append(
-                        {
-                            "address": int(m.group(1), 16),
-                            "name": m.group(2).strip(),
-                            "is_import": False,
-                            "instruction_count": 0,
-                        }
-                    )
-                    page_count += 1
+        functions, total_hint = _parse_function_page(raw or "")
+        if total_hint is not None:
+            self._renamer_load_total = total_hint
 
-        if page_count >= batch:
-            # More pages to fetch
-            self._renamer_load_offset += batch
-            return
-
-        # All pages fetched — stop timer and load into widget
-        self._renamer_fetch_timer.stop()
-        self._renamer_fetch_timer.deleteLater()
-        self._renamer_fetch_timer = None
-
-        functions = self._renamer_load_funcs
-
-        # Approximate function size from consecutive addresses
         for i in range(len(functions) - 1):
             functions[i]["instruction_count"] = functions[i + 1]["address"] - functions[i]["address"]
 
+        page_count = len(functions)
+        next_offset = offset + page_count
+        total = self._renamer_load_total
+        has_more = page_count >= batch and (not isinstance(total, int) or next_offset < total)
+        self._renamer_load_offset = next_offset
+        self._renamer_loading_page = False
+        self._bulk_renamer.append_function_page(
+            functions,
+            has_more=has_more,
+            total_hint=total,
+        )
+
         if functions:
-            self._bulk_renamer.load_functions(functions)
-            log_info(f"Loaded {len(functions)} functions into bulk renamer")
-        else:
+            log_info(f"Loaded bulk renamer function page {offset}-{next_offset}")
+        elif offset == 0:
             log_info("No functions found for bulk renamer")
 
-        # Clean up temporary state
-        self._renamer_load_funcs = []
-        self._renamer_load_defn = None
+        if not has_more:
+            self._renamer_load_defn = None
+
+    def _on_renamer_search(self, query: str) -> None:
+        """Search unloaded functions for the current renamer filter."""
+        if getattr(self, "_renamer_searching_query", None):
+            return
+        self._renamer_searching_query = query
+        QTimer.singleShot(0, lambda: self._search_renamer_functions(query))
+
+    def _search_renamer_functions(self, query: str) -> None:
+        """Append functions found outside the currently loaded renamer pages."""
+        if not hasattr(self, "_bulk_renamer"):
+            return
+
+        tool_registry = self._ctrl.get_tool_registry()
+        functions: list[dict] = []
+        query = query.strip()
+        try:
+            if _HEX_ADDRESS_QUERY_RE.fullmatch(query):
+                defn = tool_registry.get("get_function_info")
+                if defn is not None and defn.handler is not None:
+                    raw = defn.handler(address=query)
+                    parsed = _parse_function_info_result(raw or "")
+                    if parsed is not None:
+                        functions.append(parsed)
+            else:
+                defn = tool_registry.get("search_functions")
+                if defn is not None and defn.handler is not None:
+                    raw = defn.handler(query=query, limit=50)
+                    functions, _total_hint = _parse_function_page(raw or "")
+        except Exception as e:
+            log_error(f"Renamer function search failed for {query!r}: {e}")
+        finally:
+            self._renamer_searching_query = ""
+
+        if functions:
+            self._bulk_renamer.append_discovered_functions(functions)
+        self._bulk_renamer.set_search_loading(False)
 
     # --- Tools panel event handlers ---
 

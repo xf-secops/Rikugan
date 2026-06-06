@@ -156,6 +156,8 @@ class BulkRenamerWidget(QWidget):
     """Bulk function renaming interface with filtering and batch controls."""
 
     start_requested = Signal(list, str, int, int)  # jobs, mode, batch_size, max_concurrent
+    load_more_requested = Signal()
+    search_requested = Signal(str)
     pause_requested = Signal()
     cancel_requested = Signal()
     undo_requested = Signal()
@@ -189,6 +191,16 @@ class BulkRenamerWidget(QWidget):
         self._selection_label = QLabel("0 / 0 selected")
         self._selection_label.setStyleSheet(_MUTED_LABEL_STYLE)
         top_bar.addWidget(self._selection_label)
+
+        self._load_status_label = QLabel("")
+        self._load_status_label.setStyleSheet(_MUTED_LABEL_STYLE)
+        top_bar.addWidget(self._load_status_label)
+
+        self._load_more_btn = QPushButton("Load More")
+        self._load_more_btn.setStyleSheet(_BTN_STYLE)
+        self._load_more_btn.setVisible(False)
+        self._load_more_btn.clicked.connect(self._request_load_more)
+        top_bar.addWidget(self._load_more_btn)
 
         main_layout.addLayout(top_bar)
 
@@ -232,6 +244,7 @@ class BulkRenamerWidget(QWidget):
         self._table.itemChanged.connect(self._on_item_changed)
         self._table.cellClicked.connect(self._on_cell_clicked)
         self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+        self._table.verticalScrollBar().valueChanged.connect(self._on_table_scroll)
         main_layout.addWidget(self._table)
 
         # --- Analysis controls ---
@@ -328,6 +341,11 @@ class BulkRenamerWidget(QWidget):
         self._addr_to_entry: dict[int, int] = {}  # address -> index in _entries
         self._addr_to_row: dict[int, int] = {}  # address -> current table row when unsorted/load order row
         self._paused = False
+        self._has_more_functions = False
+        self._loading_more_functions = False
+        self._searching_functions = False
+        self._last_remote_search_query = ""
+        self._function_total_hint: int | str | None = None
 
     def _reposition_header_check(self, _idx: int = 0, _old: int = 0, _new: int = 0) -> None:
         """Keep the header checkbox centred in the first header section."""
@@ -383,6 +401,90 @@ class BulkRenamerWidget(QWidget):
             self._load_timer.timeout.connect(self._load_next_chunk)
             self._load_timer.start()
 
+    def begin_function_load(self, total_hint: int | str | None = None) -> None:
+        """Clear the table and prepare for paginated function loading."""
+        self._cancel_chunked_load()
+        self._loading = True
+        self._loading_more_functions = True
+        self._searching_functions = False
+        self._last_remote_search_query = ""
+        self._has_more_functions = False
+        self._function_total_hint = total_hint
+        self._table.setSortingEnabled(False)
+        self._table.itemChanged.disconnect(self._on_item_changed)
+        self._table.setRowCount(0)
+        self._entries.clear()
+        self._addr_to_entry.clear()
+        self._addr_to_row.clear()
+        self._table.itemChanged.connect(self._on_item_changed)
+        self._loading = False
+        self._update_load_status()
+        self._update_selection_count()
+
+    def append_function_page(
+        self,
+        functions: list[dict],
+        *,
+        has_more: bool,
+        total_hint: int | str | None = None,
+    ) -> None:
+        """Append one page of function rows without replacing existing rows."""
+        if total_hint is not None:
+            self._function_total_hint = total_hint
+        functions = self._dedupe_functions(functions)
+        self._loading = True
+        self._loading_more_functions = True
+        was_sorting = self._table.isSortingEnabled()
+        self._table.setSortingEnabled(False)
+        self._table.itemChanged.disconnect(self._on_item_changed)
+        start = self._table.rowCount()
+        self._table.setRowCount(start + len(functions))
+        self._populate_rows(functions, 0, len(functions), row_offset=start)
+        self._table.itemChanged.connect(self._on_item_changed)
+        self._table.setSortingEnabled(was_sorting)
+        self._loading = False
+        self._loading_more_functions = False
+        self._has_more_functions = bool(has_more)
+        self._update_load_status()
+        self._on_filter_changed()
+        self._update_selection_count()
+
+    def append_discovered_functions(self, functions: list[dict]) -> None:
+        """Append functions found by search without changing page state."""
+        self.append_function_page(
+            functions,
+            has_more=self._has_more_functions,
+            total_hint=self._function_total_hint,
+        )
+
+    def set_search_loading(self, loading: bool) -> None:
+        """Reflect an in-flight function search in the load status."""
+        was_searching = self._searching_functions
+        self._searching_functions = bool(loading)
+        self._update_load_status()
+        if was_searching and not loading and not self._loading:
+            self._on_filter_changed()
+
+    def _dedupe_functions(self, functions: list[dict]) -> list[dict]:
+        """Return only functions not already present in the table."""
+        deduped = []
+        seen = set(self._addr_to_entry)
+        for func in functions:
+            try:
+                address = int(func["address"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if address in seen:
+                continue
+            seen.add(address)
+            deduped.append(func)
+        return deduped
+
+    def set_function_page_loading(self, loading: bool) -> None:
+        """Reflect an in-flight page request in the controls."""
+        self._loading_more_functions = bool(loading)
+        self._update_load_status()
+
     def _load_next_chunk(self) -> None:
         """Insert the next chunk of rows."""
         funcs = self._pending_functions
@@ -406,10 +508,11 @@ class BulkRenamerWidget(QWidget):
         self._pending_functions = []
         self._load_cursor = 0
 
-    def _populate_rows(self, functions: list[dict], start: int, end: int) -> None:
+    def _populate_rows(self, functions: list[dict], start: int, end: int, row_offset: int = 0) -> None:
         """Insert rows [start, end) into the table."""
-        for row in range(start, end):
-            func = functions[row]
+        for idx in range(start, end):
+            row = row_offset + (idx - start)
+            func = functions[idx]
             entry = FunctionEntry(
                 address=func["address"],
                 name=func["name"],
@@ -417,7 +520,7 @@ class BulkRenamerWidget(QWidget):
                 instruction_count=func.get("instruction_count", 0),
             )
             self._entries.append(entry)
-            self._addr_to_entry[entry.address] = row
+            self._addr_to_entry[entry.address] = len(self._entries) - 1
             self._addr_to_row[entry.address] = row
 
             ic = entry.instruction_count
@@ -465,6 +568,43 @@ class BulkRenamerWidget(QWidget):
         self._table.setSortingEnabled(True)
         self._loading = False
         self._update_selection_count()
+        self._update_load_status()
+
+    def _request_load_more(self) -> None:
+        """Request another function page from the owning panel."""
+        if self._has_more_functions and not self._loading_more_functions:
+            self._loading_more_functions = True
+            self._update_load_status()
+            self.load_more_requested.emit()
+
+    def _on_table_scroll(self, value: int) -> None:
+        """Auto-load the next page when the user scrolls near the loaded end."""
+        if not self._has_more_functions or self._loading_more_functions:
+            return
+        bar = self._table.verticalScrollBar()
+        if value >= max(0, bar.maximum() - 3):
+            self._request_load_more()
+
+    def _update_load_status(self) -> None:
+        """Update load status and progressive-load controls."""
+        loaded = len(self._entries)
+        total = self._function_total_hint
+        if total is None:
+            base = f"{loaded} loaded" if loaded else "Loading functions..."
+        elif total == "unknown":
+            base = f"{loaded} loaded"
+        else:
+            base = f"{loaded} / {total} loaded"
+
+        if self._searching_functions:
+            text = f"{base} - searching..."
+        elif self._loading_more_functions:
+            text = f"{base}..."
+        else:
+            text = base
+        self._load_status_label.setText(text)
+        self._load_more_btn.setVisible(self._has_more_functions or self._loading_more_functions)
+        self._load_more_btn.setEnabled(self._has_more_functions and not self._loading_more_functions)
 
     def update_job(self, address: int, new_name: str, status: str, error: str) -> None:
         """Update a row by address with new name, status, and optional error."""
@@ -580,6 +720,7 @@ class BulkRenamerWidget(QWidget):
 
         text = self._filter_edit.text().strip().lower()
         combo_idx = self._filter_combo.currentIndex()
+        visible_matches = 0
 
         for row in range(self._table.rowCount()):
             entry = self._entry_for_row(row)
@@ -599,7 +740,28 @@ class BulkRenamerWidget(QWidget):
             elif combo_idx == 3:  # Imports
                 combo_match = entry.is_import
 
-            self._table.setRowHidden(row, not (text_match and combo_match))
+            visible = text_match and combo_match
+            if visible:
+                visible_matches += 1
+            self._table.setRowHidden(row, not visible)
+
+        if self._should_request_remote_search(text, visible_matches):
+            self._searching_functions = True
+            self._last_remote_search_query = text
+            self._update_load_status()
+            self.search_requested.emit(text)
+
+    def _should_request_remote_search(self, text: str, visible_matches: int) -> bool:
+        """Return true when the current filter should ask the host to search unloaded functions."""
+        if not text or visible_matches > 0:
+            return False
+        if not self._has_more_functions:
+            return False
+        if self._searching_functions:
+            return False
+        if text == self._last_remote_search_query:
+            return False
+        return len(text) >= 2 or text.startswith("0x")
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         """Track checkbox state changes."""
@@ -690,6 +852,11 @@ class BulkRenamerWidget(QWidget):
                 item.setCheckState(Qt.CheckState.Checked)
             self._table.itemChanged.connect(self._on_item_changed)
             self._update_selection_count()
+        elif self._has_more_functions and not self._searching_functions:
+            self._searching_functions = True
+            self._last_remote_search_query = addr_str
+            self._update_load_status()
+            self.search_requested.emit(addr_str)
 
     @staticmethod
     def _is_auto_named(name: str) -> bool:
