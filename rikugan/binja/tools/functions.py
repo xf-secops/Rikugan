@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import islice
 from typing import Annotated
 
 from ...core.logging import log_debug
@@ -49,15 +50,35 @@ def list_functions(
 ) -> str:
     """List functions in the binary with pagination."""
     bv = require_bv()
-    funcs = iter_functions(bv)
-    total = len(funcs)
-    page = funcs[offset : offset + limit]
+    offset = max(0, int(offset))
+    limit = max(1, int(limit))
+    page, total = _paged_functions(bv, offset, limit)
 
     lines = [f"Functions {offset}\u2013{offset + len(page)} of {total}:"]
     for f in page:
         start = int(getattr(f, "start", 0))
         lines.append(f"  0x{start:x}  {get_function_name(f)}")
     return "\n".join(lines)
+
+
+def _paged_functions(bv, offset: int, limit: int) -> tuple[list, int | str]:
+    """Return one function page without copying the whole BN function list."""
+    funcs_obj = getattr(bv, "functions", []) or []
+    try:
+        total: int | str = len(funcs_obj)
+    except TypeError:
+        total = "unknown"
+
+    try:
+        page = list(funcs_obj[offset : offset + limit])
+    except TypeError:
+        page = list(islice(iter(funcs_obj), offset, offset + limit))
+
+    try:
+        page.sort(key=lambda f: int(getattr(f, "start", 0)))
+    except Exception as e:
+        log_debug(f"Function page sort failed: {e}")
+    return page, total
 
 
 @tool(category="functions")
