@@ -481,6 +481,14 @@ class SettingsDialog(QDialog):
         self._restore_sessions_cb.setToolTip("Disable this when large analysis sessions make the panel slow to open.")
         behavior_form.addRow(self._restore_sessions_cb)
 
+        self._dont_auto_load_cb = QCheckBox("Don't auto-load chats (show a placeholder, pick from the sidebar)")
+        self._dont_auto_load_cb.setChecked(self._config.dont_auto_load_chats)
+        self._dont_auto_load_cb.setToolTip(
+            "List saved chats in the sidebar but don't open any on startup.\n"
+            "Rikugan opens to a placeholder; selecting a chat loads it on demand."
+        )
+        behavior_form.addRow(self._dont_auto_load_cb)
+
         storage_row = QHBoxLayout()
         self._session_storage_edit = QLineEdit(self._config.session_storage_dir)
         self._session_storage_edit.setPlaceholderText("Default: Rikugan config/checkpoints")
@@ -919,6 +927,7 @@ class SettingsDialog(QDialog):
         self._config.auto_context = self._auto_context_cb.isChecked()
         self._config.checkpoint_auto_save = self._auto_save_cb.isChecked()
         self._config.restore_sessions_on_start = self._restore_sessions_cb.isChecked()
+        self._config.dont_auto_load_chats = self._dont_auto_load_cb.isChecked()
         self._config.session_storage_dir = self._session_storage_edit.text().strip()
         self._config.exploration_turn_limit = self._explore_turns_spin.value()
         self._config.max_retries = self._max_retries_spin.value()

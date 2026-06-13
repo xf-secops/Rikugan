@@ -45,6 +45,9 @@ class RikuganConfig:
     plan_mode_default: bool = False
     checkpoint_auto_save: bool = True
     restore_sessions_on_start: bool = True
+    # When True, saved chats are listed in the sidebar but none is opened on
+    # startup — a placeholder is shown until the user picks or creates one.
+    dont_auto_load_chats: bool = False
     session_storage_dir: str = ""
     approve_mutations: bool = False  # require approval for mutating tools (rename, retype, etc.)
     exploration_turn_limit: int = 100  # max turns in exploration phase before forcing transition
@@ -178,6 +181,7 @@ class RikuganConfig:
             "plan_mode_default",
             "checkpoint_auto_save",
             "restore_sessions_on_start",
+            "dont_auto_load_chats",
             "session_storage_dir",
             "approve_mutations",
             "exploration_turn_limit",

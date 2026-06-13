@@ -311,6 +311,7 @@ def _make_panel():
     panel._pending_answer_tabs = set()
     panel._awaiting_approval_tabs = set()
     panel._chat_views = {}
+    panel._chat_area_stack = None
     panel._chat_sidebar = None
     panel._tab_status = {}
     panel._tab_approval = {}
@@ -656,6 +657,57 @@ class TestUpdateTokenDisplay(unittest.TestCase):
         panel._ctrl.get_context_window.return_value = 0
         panel._update_token_display(1234)
         mock_cb.set_tokens.assert_called_once_with(1234, 0)
+
+
+class TestDontAutoLoadChats(unittest.TestCase):
+    def test_add_unloaded_chat_lists_without_chat_view(self):
+        panel = _make_panel()
+        panel._chat_sidebar = MagicMock()
+        panel._ctrl.tab_label.return_value = "My Chat"
+        panel._chat_detail = MagicMock(return_value="1 thread")
+        session = MagicMock()
+        session.messages = [MagicMock(), MagicMock()]
+
+        panel._add_unloaded_chat("tid1", session)
+
+        # Listed in the sidebar and stashed for replay, but NO ChatView built.
+        panel._chat_sidebar.add_chat.assert_called_once_with("tid1", "My Chat", "1 thread")
+        self.assertEqual(panel._pending_restore_messages["tid1"], session.messages)
+        self.assertNotIn("tid1", panel._chat_views)
+
+    def test_select_unloaded_chat_materializes_view(self):
+        panel = _make_panel()
+        panel._chat_sidebar = MagicMock()
+        panel._chat_area_stack = MagicMock()
+        panel._tab_widget.count.return_value = 0
+        panel._restore_messages_if_needed = MagicMock()
+        panel._update_token_display = MagicMock()
+        panel._set_running = MagicMock()
+        session = MagicMock()
+        session.messages = []
+        panel._ctrl.get_session.return_value = session
+        panel._ctrl.tab_label.return_value = "Lazy"
+        panel._ctrl.is_tab_running.return_value = False
+
+        def fake_create(tab_id, label, add_to_sidebar=True, select=True):
+            panel._chat_views[tab_id] = MagicMock()
+
+        panel._create_tab = MagicMock(side_effect=fake_create)
+
+        panel._select_chat("lazytid")
+
+        panel._create_tab.assert_called_once_with("lazytid", "Lazy", add_to_sidebar=False, select=False)
+        panel._ctrl.switch_tab.assert_called_with("lazytid")
+        panel._restore_messages_if_needed.assert_called_once_with("lazytid")
+
+    def test_select_unknown_chat_is_noop(self):
+        panel = _make_panel()
+        panel._ctrl.get_session.return_value = None
+        panel._create_tab = MagicMock()
+
+        panel._select_chat("ghost")
+
+        panel._create_tab.assert_not_called()
 
 
 if __name__ == "__main__":
