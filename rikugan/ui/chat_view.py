@@ -90,6 +90,13 @@ class ChatView(QScrollArea):
         self._scroll_timer.setSingleShot(True)
         self._scroll_timer.setInterval(80)
         self._scroll_timer.timeout.connect(self._do_scroll)
+        # Auto-scroll "follow" intent. Streaming only sticks to the bottom while
+        # this is True; the user's own scrolling toggles it (scroll up to read
+        # history -> stop following; scroll back to the bottom -> resume).
+        self._follow_bottom = True
+        self._pending_force = False
+        self._programmatic_scroll = False
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll_value_changed)
 
         # Timer for minimum thinking display duration (500ms)
         self._thinking_hide_timer = QTimer(self)
@@ -110,6 +117,10 @@ class ChatView(QScrollArea):
         widget = UserMessageWidget(text, parent=self._container)
         self._insert_widget(widget)
         self._current_assistant = None
+        # Sending is an explicit action — always jump to the bottom, even if the
+        # user had scrolled up (and even though inserting this message grows the
+        # content enough that the near-bottom heuristic would otherwise fail).
+        self._scroll_to_bottom(force=True)
 
     def add_error_message(self, text: str) -> None:
         self._insert_widget(ErrorMessageWidget(text, parent=self._container))
@@ -117,7 +128,7 @@ class ChatView(QScrollArea):
 
     def add_queued_message(self, text: str) -> None:
         self._insert_widget(QueuedMessageWidget(text, parent=self._container))
-        self._scroll_to_bottom()
+        self._scroll_to_bottom(force=True)
 
     def remove_queued_messages(self) -> None:
         """Remove all [queued] message widgets (e.g. on cancel)."""
@@ -263,6 +274,8 @@ class ChatView(QScrollArea):
         if event.type == TurnEventType.TEXT_DELTA:
             if self._current_assistant is None:
                 self._current_assistant = AssistantMessageWidget(parent=self._container)
+                # Follow the typewriter reveal, which renders between deltas.
+                self._current_assistant.set_render_callback(self._scroll_to_bottom)
                 self._insert_widget(self._current_assistant)
             self._current_assistant.append_text(event.text)
             self._scroll_to_bottom()
@@ -530,18 +543,48 @@ class ChatView(QScrollArea):
         if self._container is not None:
             self._container.setFixedWidth(self.viewport().width())
 
-    def _is_near_bottom(self) -> bool:
-        """True if the user hasn't scrolled up (within ~60px of bottom)."""
-        sb = self.verticalScrollBar()
-        return sb.maximum() - sb.value() < 60
+    def _on_scroll_value_changed(self, value: int) -> None:
+        """Track the user's follow intent from their own scrolling.
 
-    def _scroll_to_bottom(self) -> None:
-        if self._is_near_bottom():
+        Programmatic scrolls (our own ``_do_scroll``) are ignored; only a user
+        moving the scrollbar updates whether we should keep sticking to bottom.
+        """
+        if self._programmatic_scroll:
+            return
+        sb = self.verticalScrollBar()
+        self._follow_bottom = (sb.maximum() - value) <= 16
+
+    def _scroll_to_bottom(self, force: bool = False) -> None:
+        if force:
+            # Explicit user action (send/queue): re-arm follow and pin to bottom.
+            self._follow_bottom = True
+            self._pending_force = True
+            self._scroll_timer.start()
+        elif self._follow_bottom:
             self._scroll_timer.start()
 
+    def _set_scroll_value_silently(self, value: int) -> None:
+        """setValue without it being read back as a user scroll."""
+        self._programmatic_scroll = True
+        try:
+            self.verticalScrollBar().setValue(value)
+        finally:
+            self._programmatic_scroll = False
+
     def _do_scroll(self) -> None:
+        force = self._pending_force
+        self._pending_force = False
+        # Re-check at fire time: the user may have scrolled up during the 80ms
+        # coalescing window, in which case a non-forced scroll must not yank
+        # them back down.
+        if not force and not self._follow_bottom:
+            return
         sb = self.verticalScrollBar()
-        sb.setValue(sb.maximum())
+        self._set_scroll_value_silently(sb.maximum())
+        if force:
+            # The just-inserted widget may not be laid out yet, so maximum() can
+            # be stale; re-assert once the pending layout pass completes.
+            QTimer.singleShot(0, lambda: self._set_scroll_value_silently(self.verticalScrollBar().maximum()))
 
     def shutdown(self) -> None:
         self._scroll_timer.stop()

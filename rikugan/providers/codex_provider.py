@@ -98,8 +98,8 @@ def _id_token_info(id_token: str) -> dict[str, Any]:
 def _codex_models_client_version() -> str:
     for path, key in ((_models_cache_path(), "client_version"), (_version_path(), "latest_version")):
         try:
-            value = json.loads(path.read_text()).get(key)
-        except (OSError, json.JSONDecodeError, AttributeError):
+            value = json.loads(path.read_text(encoding="utf-8")).get(key)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
             continue
         if isinstance(value, str) and value:
             return value
@@ -220,7 +220,7 @@ def complete_codex_device_code_login(device_code: CodexDeviceCode, timeout_secon
 
 def codex_auth_status() -> tuple[str, str]:
     try:
-        auth = json.loads(_auth_path().read_text())
+        auth = json.loads(_auth_path().read_text(encoding="utf-8"))
         tokens = auth.get("tokens") or {}
         if (
             auth.get("auth_mode") == CODEX_AUTH_MODE
@@ -229,7 +229,7 @@ def codex_auth_status() -> tuple[str, str]:
             and tokens.get("refresh_token")
         ):
             return "ChatGPT OAuth", "ok"
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         pass
     return "Setup required", "error"
 
@@ -261,8 +261,8 @@ class CodexProvider(LLMProvider):
 
     def _load_auth(self) -> dict[str, Any]:
         try:
-            auth = json.loads(_auth_path().read_text())
-        except (OSError, json.JSONDecodeError) as exc:
+            auth = json.loads(_auth_path().read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise AuthenticationError(
                 "No Codex OAuth token found. Open settings and run Setup Codex.",
                 provider="codex",
@@ -386,13 +386,22 @@ class CodexProvider(LLMProvider):
             return None
         return parsed if parsed > 0 else None
 
+    def list_models(self) -> list[ModelInfo]:
+        """Always resolve the model list from the Codex upstream.
+
+        Codex model availability is account- and client-version-specific, so a
+        static fallback would misrepresent what the user can actually call.
+        Unlike the base implementation, failures are propagated to the caller
+        (e.g. the settings dialog) so they surface as an explicit error instead
+        of being masked behind placeholder models.
+        """
+        return self._fetch_models_live()
+
     @staticmethod
     def _builtin_models() -> list[ModelInfo]:
-        return [
-            ModelInfo("gpt-5.4", "GPT-5.4", "codex", 272000, 128000, True, True),
-            ModelInfo("gpt-5.2-codex", "GPT-5.2 Codex", "codex", 272000, 128000, True, True),
-            ModelInfo("gpt-5-codex", "GPT-5 Codex", "codex", 272000, 128000, True, True),
-        ]
+        # Codex has no offline defaults — see list_models(). The model list is
+        # always fetched live; if it doesn't arrive, the model is not available.
+        return []
 
     def _format_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []

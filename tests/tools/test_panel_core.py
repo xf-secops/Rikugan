@@ -319,6 +319,8 @@ def _make_panel():
     panel._mutation_panel = None
     panel._skills_refresh_timer = None
     panel._poll_timer = None
+    panel._restore_timer = None
+    panel._restore_queue = None
     panel._input_area = MagicMock()
     panel._send_btn = MagicMock()
     panel._cancel_btn = MagicMock()

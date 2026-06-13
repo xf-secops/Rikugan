@@ -8,6 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from tests.mocks.ida_mock import install_ida_mocks
+
 install_ida_mocks()
 
 
@@ -23,6 +24,7 @@ class TestBuiltinModels(unittest.TestCase):
     def test_anthropic_builtin_models(self):
         _reload_anthropic_provider_module()
         from rikugan.providers.anthropic_provider import AnthropicProvider
+
         p = AnthropicProvider(api_key="test", model="test")
         models = p._builtin_models()
         self.assertTrue(len(models) > 0)
@@ -32,21 +34,29 @@ class TestBuiltinModels(unittest.TestCase):
 
     def test_openai_builtin_models(self):
         from rikugan.providers.openai_provider import OpenAIProvider
+
         p = OpenAIProvider(api_key="test", model="test")
         models = p._builtin_models()
         self.assertTrue(len(models) > 0)
         for m in models:
             self.assertEqual(m.provider, "openai")
 
-    def test_codex_builtin_models(self):
+    def test_codex_has_no_offline_defaults(self):
+        # Codex intentionally has no builtin/fallback list: the model list is
+        # always resolved live (list_models -> _fetch_models_live) so a failed
+        # fetch surfaces as an error instead of placeholder models.
         from rikugan.providers.codex_provider import CodexProvider
-        models = CodexProvider._builtin_models()
-        self.assertTrue(len(models) > 0)
-        for m in models:
-            self.assertEqual(m.provider, "codex")
+
+        self.assertEqual(CodexProvider._builtin_models(), [])
+        # Codex overrides list_models so the base builtin-fallback path is bypassed.
+        self.assertIsNot(
+            CodexProvider.list_models,
+            CodexProvider.__mro__[1].list_models,  # base LLMProvider.list_models
+        )
 
     def test_gemini_builtin_models(self):
         from rikugan.providers.gemini_provider import GeminiProvider
+
         models = GeminiProvider._builtin_models()
         self.assertTrue(len(models) > 0)
         for m in models:
@@ -60,6 +70,7 @@ class TestProviderCapabilities(unittest.TestCase):
     def test_anthropic_capabilities(self):
         _reload_anthropic_provider_module()
         from rikugan.providers.anthropic_provider import AnthropicProvider
+
         p = AnthropicProvider(api_key="test", model="test")
         caps = p.capabilities
         self.assertTrue(caps.streaming)
@@ -68,6 +79,7 @@ class TestProviderCapabilities(unittest.TestCase):
 
     def test_openai_capabilities(self):
         from rikugan.providers.openai_provider import OpenAIProvider
+
         p = OpenAIProvider(api_key="test", model="test")
         caps = p.capabilities
         self.assertTrue(caps.streaming)
@@ -75,6 +87,7 @@ class TestProviderCapabilities(unittest.TestCase):
 
     def test_gemini_capabilities(self):
         from rikugan.providers.gemini_provider import GeminiProvider
+
         p = GeminiProvider(api_key="test", model="test")
         caps = p.capabilities
         self.assertTrue(caps.streaming)

@@ -149,13 +149,13 @@ class RikuganConfig:
         else:
             d["encryption"] = {"enabled": False}
 
-        with open(self.config_path, "w") as f:
+        with open(self.config_path, "w", encoding="utf-8") as f:
             json.dump(d, f, indent=2)
 
     def load(self) -> None:
         if not os.path.exists(self.config_path):
             return
-        with open(self.config_path) as f:
+        with open(self.config_path, encoding="utf-8") as f:
             data = json.load(f)
         # Schema version check (for future migrations)
         _stored_version = data.pop("schema_version", 0)

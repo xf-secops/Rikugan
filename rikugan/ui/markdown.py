@@ -27,6 +27,15 @@ _MARKDOWN_HINT_RE = re.compile(
 )
 
 
+def resolve_markdown_theme(source=None) -> dict[str, str]:
+    """Public wrapper around the markdown style resolution.
+
+    Callers that render repeatedly (streaming message widgets) resolve this
+    once and pass the result to ``md_to_html`` to avoid per-frame palette work.
+    """
+    return _theme_markdown_styles(source)
+
+
 def _theme_markdown_styles(source=None) -> dict[str, str]:
     colors = get_chat_color_tokens(source)
     code_bg = colors["code_bg"]
@@ -56,11 +65,17 @@ def _has_markdown_syntax(text: str) -> bool:
     return bool(text and _MARKDOWN_HINT_RE.search(text))
 
 
-def md_to_html(text: str, source=None) -> str:
-    """Convert a Markdown string to Qt-compatible HTML."""
+def md_to_html(text: str, source=None, theme: dict[str, str] | None = None) -> str:
+    """Convert a Markdown string to Qt-compatible HTML.
+
+    ``theme`` may be a pre-resolved style dict (see ``_theme_markdown_styles``)
+    to skip palette resolution.  Streaming widgets pass a cached theme so the
+    per-frame render cost doesn't include re-reading the host palette and
+    re-blending colors on every delta.
+    """
     if not text:
         return ""
-    theme = _theme_markdown_styles(source)
+    theme = theme or _theme_markdown_styles(source)
     if not _has_markdown_syntax(text):
         escaped = html.escape(text).replace("\n", "<br>")
         return re.sub(r"(<br>\s*){3,}", "<br><br>", escaped)
