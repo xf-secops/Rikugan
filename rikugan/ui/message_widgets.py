@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import random
 import re as _re
-import time as _time
 from typing import ClassVar
 
-from .markdown import md_to_html
+from .markdown import md_to_html, resolve_markdown_theme
 from .qt_compat import (
     QFrame,
     QHBoxLayout,
@@ -400,6 +399,7 @@ class _ThinkingBlock(QFrame):
         layout.addWidget(self._content)
 
         self._expanded = False
+        self._md_theme: dict[str, str] | None = None
         self.hide()
 
     def _on_toggle(self) -> None:
@@ -408,7 +408,9 @@ class _ThinkingBlock(QFrame):
         self._toggle.setText("\u25bc" if self._expanded else "\u25b6")
 
     def set_thinking(self, text: str, in_progress: bool = False) -> None:
-        self._content.setText(md_to_html(text, self))
+        if self._md_theme is None:
+            self._md_theme = resolve_markdown_theme(self)
+        self._content.setText(md_to_html(text, self, theme=self._md_theme))
         label = "Thinking\u2026" if in_progress else "Thinking"
         self._header_label.setText(label)
         self.show()
@@ -419,24 +421,81 @@ class _ThinkingBlock(QFrame):
 # ---------------------------------------------------------------------------
 
 
-class AssistantMessageWidget(QFrame):
-    """Displays an assistant message with streaming support and Markdown rendering."""
+def _commit_index_in_tail(tail: str) -> int:
+    """Return how many leading chars of *tail* form complete Markdown blocks.
 
-    # Render at most every 100ms during streaming regardless of message length.
-    # This caps the O(n) md_to_html cost to ~10 fps as messages grow.
-    _RENDER_INTERVAL_S: float = 0.10
-    # Minimum pending chars before a time-gated render fires (avoids renders for tiny deltas).
-    _RENDER_BATCH_MIN: int = 30
-    # Unconditional render threshold — ensures we flush even when the interval
-    # hasn't elapsed (e.g. burst of 500+ chars in a single poll tick).
-    _RENDER_BATCH_MAX: int = 500
+    A safe commit point is a paragraph break (``\\n\\n``) that is not inside an
+    open code fence.  ``tail`` is assumed to start at a block boundary with a
+    *closed* fence state (guaranteed by the caller, which only commits whole
+    blocks).  Uses ``str.find`` jumps so the scan is cheap even for code blocks.
+    """
+    in_fence = False
+    pos = 0
+    last = 0
+    n = len(tail)
+    while pos < n:
+        fence = tail.find("```", pos)
+        if not in_fence:
+            limit = fence if fence != -1 else n
+            nn = tail.find("\n\n", pos, limit)
+            if nn != -1:
+                pos = last = nn + 2
+                continue
+            if fence == -1:
+                break
+            in_fence = True
+            pos = fence + 3
+        else:
+            if fence == -1:
+                break  # unterminated fence — keep it in the live tail
+            in_fence = False
+            pos = fence + 3
+    return last
+
+
+class AssistantMessageWidget(QFrame):
+    """Displays an assistant message with streaming support and Markdown rendering.
+
+    Streaming is kept smooth on three fronts so per-frame cost stays O(tail)
+    instead of O(message) — even for long answers:
+
+    * **Display buffer (typewriter):** incoming deltas accumulate in
+      ``_full_text`` while a ``_reveal_timer`` reveals them at a steady cadence,
+      so bursty network arrival doesn't produce jumpy output.  The reveal rate
+      catches up to the buffer so it never lags behind the model.
+    * **Committed/tail split (two labels):** finalized Markdown blocks render
+      once into ``_committed_label`` and are never re-parsed or re-laid-out;
+      only the small in-progress *tail* is re-rendered into ``_tail_label`` each
+      frame.  This bounds both the Markdown parse *and* the Qt rich-text layout
+      to the tail.  On finalize everything collapses into the committed label so
+      the message is a single selectable block.
+    * **Thinking fast-path:** the ``<think>`` regex split only runs when a
+      ``<think>`` tag is actually present (the common case skips it).
+    """
+
+    # Reveal cadence for the typewriter buffer (~33 fps).
+    _REVEAL_INTERVAL_MS: int = 30
+    # Reveal at least this many chars per tick so short tails still animate.
+    _REVEAL_MIN_CHARS: int = 3
+    # Drain a fraction of the backlog each tick so large bursts catch up fast
+    # without snapping (remaining // divisor chars per tick).
+    _REVEAL_CATCHUP_DIVISOR: int = 3
 
     def __init__(self, parent: QWidget = None):
         super().__init__(parent)
         self.setObjectName("message_assistant")
         self._full_text = ""
-        self._pending_delta = 0
-        self._last_render_time: float = 0.0
+        self._displayed_len = 0
+        # Incrementally rendered HTML for finalized visible blocks (B2).
+        self._committed_html = ""
+        self._committed_visible_len = 0
+        # Resolve the markdown theme once; reuse it on every streaming frame so
+        # render cost excludes palette reads and color blends. The host theme is
+        # effectively constant for a message's lifetime.
+        self._md_theme: dict[str, str] | None = None
+        # Optional callback fired after each render so the parent can follow the
+        # typewriter reveal (which happens between delta arrivals).
+        self._render_callback = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -453,71 +512,157 @@ class AssistantMessageWidget(QFrame):
         self._thinking_block = _ThinkingBlock()
         layout.addWidget(self._thinking_block)
 
+        # The bubble is a frame carrying the surface (bg/border/radius); the
+        # committed and tail labels live inside it with transparent backgrounds
+        # so the two stacked labels read as one continuous bubble.
         bubble = _assistant_bubble_theme(self)
-        self._content = _HeightCachedLabel()
-        self._content.setWordWrap(True)
-        self._content.setTextFormat(Qt.TextFormat.RichText)
-        self._content.setTextInteractionFlags(
+        self._bubble = QFrame()
+        self._bubble.setObjectName("message_assistant_bubble")
+        self._bubble.setStyleSheet(
+            f"QFrame#message_assistant_bubble {{ {_frame_css(background=bubble['background'], border=bubble['border'], radius=10)} }}"
+        )
+        bubble_layout = QVBoxLayout(self._bubble)
+        bubble_layout.setContentsMargins(12, 8, 12, 8)  # emulates bubble padding
+        bubble_layout.setSpacing(0)
+
+        self._committed_label = self._make_content_label(bubble["text"])
+        self._committed_label.hide()
+        bubble_layout.addWidget(self._committed_label)
+        self._tail_label = self._make_content_label(bubble["text"])
+        bubble_layout.addWidget(self._tail_label)
+
+        self._bubble.setMinimumWidth(0)
+        self._bubble.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        layout.addWidget(self._bubble)
+
+        self._reveal_timer = QTimer(self)
+        self._reveal_timer.setInterval(self._REVEAL_INTERVAL_MS)
+        self._reveal_timer.timeout.connect(self._reveal_tick)
+
+    @staticmethod
+    def _make_content_label(text_color: str) -> _HeightCachedLabel:
+        label = _HeightCachedLabel()
+        label.setWordWrap(True)
+        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setTextInteractionFlags(
             qt_flags(
                 Qt.TextInteractionFlag.TextSelectableByMouse,
                 Qt.TextInteractionFlag.TextSelectableByKeyboard,
                 Qt.TextInteractionFlag.LinksAccessibleByMouse,
             )
         )
-        self._content.setOpenExternalLinks(True)
-        self._content.setStyleSheet(
-            _bubble_css(
-                background=bubble["background"],
-                text_color=bubble["text"],
-                border=bubble["border"],
-            )
-        )
-        # Prevent the label from requesting more width than its parent
-        self._content.setMinimumWidth(0)
-        self._content.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        layout.addWidget(self._content)
+        label.setOpenExternalLinks(True)
+        label.setStyleSheet(f"background: transparent; color: {text_color}; font-size: 13px;")
+        label.setMinimumWidth(0)
+        label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        return label
 
-    def _render(self) -> None:
-        thinking, visible = _split_thinking(self._full_text)
+    def set_render_callback(self, callback) -> None:
+        """Register a callback fired after each render (e.g. scroll-to-bottom)."""
+        self._render_callback = callback
+
+    def _md_theme_cached(self) -> dict[str, str]:
+        if self._md_theme is None:
+            self._md_theme = resolve_markdown_theme(self)
+        return self._md_theme
+
+    def _update_thinking(self, text: str) -> str:
+        """Sync the thinking block from *text*; return the visible portion.
+
+        Fast-path: the ``<think>`` regex split only runs when a tag is present,
+        so the common (no-reasoning) case avoids an O(n) scan per frame.
+        """
+        if "<think>" not in text:
+            self._thinking_block.hide()
+            return text
+        thinking, visible = _split_thinking(text)
         if thinking:
-            in_progress = "<think>" in self._full_text and "</think>" not in self._full_text
+            in_progress = "</think>" not in text
             self._thinking_block.set_thinking(thinking, in_progress=in_progress)
         else:
             self._thinking_block.hide()
-        self._content.setText(md_to_html(visible, self))
-        self._pending_delta = 0
-        self._last_render_time = _time.monotonic()
-        self._content.pin_height()
+        return visible
+
+    def _render_progressive(self) -> None:
+        """Render the revealed text, re-parsing/laying out only the tail."""
+        theme = self._md_theme_cached()
+        visible = self._update_thinking(self._full_text[: self._displayed_len])
+
+        # Visible text is append-only in practice; reset defensively if it shrank
+        # (e.g. a <think> block resolving) so the committed prefix stays valid.
+        if self._committed_visible_len > len(visible):
+            self._committed_html = ""
+            self._committed_visible_len = 0
+            self._committed_label.clear()
+            self._committed_label.hide()
+
+        tail = visible[self._committed_visible_len :]
+        commit = _commit_index_in_tail(tail)
+        if commit > 0:
+            segment = tail[:commit]
+            self._committed_html += md_to_html(segment, self, theme=theme) + "<br>"
+            self._committed_visible_len += commit
+            tail = visible[self._committed_visible_len :]
+            # Committed label changes only when a block finalizes (infrequent),
+            # so its layout cost is paid once per block, not per frame.
+            self._committed_label.setText(self._committed_html)
+            self._committed_label.show()
+            self._committed_label.pin_height()
+
+        self._tail_label.setText(md_to_html(tail, self, theme=theme))
+        self._tail_label.setVisible(bool(tail))
+        self._tail_label.pin_height()
+        if self._render_callback is not None:
+            self._render_callback()
+
+    def _render_full(self) -> None:
+        """Render the entire message into the committed label (finalize/restore)."""
+        theme = self._md_theme_cached()
+        visible = self._update_thinking(self._full_text)
+        self._committed_label.setText(md_to_html(visible, self, theme=theme))
+        self._committed_label.show()
+        self._committed_label.pin_height()
+        self._tail_label.clear()
+        self._tail_label.hide()
+
+    def _reveal_tick(self) -> None:
+        remaining = len(self._full_text) - self._displayed_len
+        if remaining <= 0:
+            self._reveal_timer.stop()
+            return
+        step = max(self._REVEAL_MIN_CHARS, remaining // self._REVEAL_CATCHUP_DIVISOR)
+        self._displayed_len = min(len(self._full_text), self._displayed_len + step)
+        self._render_progressive()
+        if self._displayed_len >= len(self._full_text):
+            self._reveal_timer.stop()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if event.size().width() != event.oldSize().width():
-            self._content.pin_height()
+            self._committed_label.pin_height()
+            self._tail_label.pin_height()
 
     def append_text(self, delta: str) -> None:
         self._full_text += delta
-        self._pending_delta += len(delta)
-        # Unconditional flush for very large bursts (prevents queue build-up).
-        if self._pending_delta >= self._RENDER_BATCH_MAX:
-            self._render()
-            return
-        # Time-gated render: fire once per interval when enough chars are pending.
-        # This caps md_to_html cost to ~10 fps regardless of how long the message
-        # has grown — avoids O(n²) total render work over a long response.
-        if (
-            self._pending_delta >= self._RENDER_BATCH_MIN
-            and _time.monotonic() - self._last_render_time >= self._RENDER_INTERVAL_S
-        ):
-            self._render()
+        # Drive rendering from the reveal timer rather than the arrival cadence,
+        # so a burst of deltas animates smoothly instead of jumping.
+        if not self._reveal_timer.isActive():
+            self._reveal_timer.start()
 
     def set_text(self, text: str) -> None:
+        # Finalize/restore: snap to the authoritative full render so nothing is
+        # left half-revealed and the committed/tail split can't drift.
+        self._reveal_timer.stop()
         self._full_text = text
-        self._render()
+        self._displayed_len = len(text)
+        self._committed_html = ""
+        self._committed_visible_len = 0
+        self._render_full()
         # During session restore, setUpdatesEnabled(False) is active when this
         # is called, so the widget has no width yet and pin_height() returns
         # early. Schedule a deferred call so it re-pins after the layout pass.
-        if self._content.width() <= 0:
-            QTimer.singleShot(0, self._content.pin_height)
+        if self._committed_label.width() <= 0:
+            QTimer.singleShot(0, self._committed_label.pin_height)
 
     def full_text(self) -> str:
         return self._full_text

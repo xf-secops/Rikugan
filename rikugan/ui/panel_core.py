@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import queue
 import re
 import threading
 import time
@@ -637,6 +638,8 @@ class RikuganPanelCore(QWidget):
         self._context_bar: ContextBar | None = None
         self._mutation_panel: MutationLogPanel | None = None
         self._skills_refresh_timer: QTimer | None = None
+        self._restore_timer: QTimer | None = None
+        self._restore_queue: queue.Queue | None = None
 
         self._check_oauth_consent()
 
@@ -1256,6 +1259,7 @@ class RikuganPanelCore(QWidget):
             tools_panel = getattr(self, "_tools_panel", None)
             self._stop_poll_timer()
             self._stop_skills_refresh_timer()
+            self._stop_restore_poll_timer()
             _SharedSpinnerTimer.shutdown()
             if self._context_bar:
                 self._context_bar.stop()
@@ -1564,12 +1568,73 @@ class RikuganPanelCore(QWidget):
         self._set_running(False, tab_id=tab_id)
 
     def _try_restore_session(self) -> None:
-        restored = self._ctrl.restore_sessions()
+        """Kick off session restore without blocking first paint.
+
+        The heavy work — reading and parsing every saved chat from disk — runs
+        on a background thread.  When it finishes, a poll timer builds the tabs
+        back on the UI thread (Qt widgets must not be created off-thread).
+        """
+        if not self._config.restore_sessions_on_start:
+            return
+        # Cancel any in-flight restore (e.g. a rapid database switch).
+        self._stop_restore_poll_timer()
+        result_queue: queue.Queue = queue.Queue()
+        self._restore_queue = result_queue
+
+        def _load() -> None:
+            try:
+                sessions = self._ctrl.load_restorable_sessions()
+            except Exception as e:  # defensive: never let the thread die silently
+                log_error(f"Session restore load failed: {e}")
+                sessions = []
+            result_queue.put(sessions)
+
+        threading.Thread(target=_load, daemon=True, name="rikugan-session-restore").start()
+        self._ensure_restore_poll_timer()
+
+    def _ensure_restore_poll_timer(self) -> None:
+        if self._restore_timer is not None:
+            return
+        self._restore_timer = QTimer(self)
+        self._restore_timer.setInterval(40)
+        self._restore_timer.timeout.connect(self._poll_restore)
+        self._restore_timer.start()
+
+    def _stop_restore_poll_timer(self) -> None:
+        if self._restore_timer is None:
+            return
+        self._restore_timer.stop()
+        try:
+            self._restore_timer.timeout.disconnect(self._poll_restore)
+        except (RuntimeError, TypeError) as e:
+            log_debug(f"restore timer disconnect failed: {e}")
+        self._restore_timer.deleteLater()
+        self._restore_timer = None
+
+    def _poll_restore(self) -> None:
+        if self._is_shutdown:
+            self._stop_restore_poll_timer()
+            return
+        if self._restore_queue is None:
+            self._stop_restore_poll_timer()
+            return
+        try:
+            sessions = self._restore_queue.get_nowait()
+        except queue.Empty:
+            return
+        self._stop_restore_poll_timer()
+        self._restore_queue = None
+        self._apply_restored_sessions(sessions)
+
+    def _apply_restored_sessions(self, sessions: list) -> None:
+        """Register pre-loaded sessions and build their tabs (UI thread)."""
+        if self._is_shutdown:
+            return
+        restored = self._ctrl.register_restored_sessions(sessions)
         if restored:
-            # Remove the default empty tab if it was replaced
+            # Remove the default empty tab if registration dropped it.
             for tid, cv in list(self._chat_views.items()):
                 if tid not in self._ctrl.tab_ids:
-                    # This tab was removed during restore
                     for i in range(self._tab_widget.count()):
                         if self._tab_widget.widget(i) is cv:
                             self._tab_widget.removeTab(i)
@@ -1583,19 +1648,20 @@ class RikuganPanelCore(QWidget):
                 self._pending_restore_messages[tab_id] = session.messages
                 self._create_tab(tab_id, label)
 
-            # Activate the last (most recent) tab
-            if restored:
-                last_tab_id = restored[-1][0]
-                last_cv = self._chat_views.get(last_tab_id)
-                if last_cv:
-                    for i in range(self._tab_widget.count()):
-                        if self._tab_widget.widget(i) is last_cv:
-                            self._tab_widget.setCurrentIndex(i)
-                            break
-                    self._restore_messages_if_needed(last_tab_id)
-                self._update_token_display()
+            # Align the visible tab with the controller's active tab (which
+            # only moved if the default empty tab was dropped).
+            active = self._ctrl.active_tab_id
+            active_cv = self._chat_views.get(active)
+            if active_cv is not None:
+                for i in range(self._tab_widget.count()):
+                    if self._tab_widget.widget(i) is active_cv:
+                        self._tab_widget.setCurrentIndex(i)
+                        break
+                self._restore_messages_if_needed(active)
+            self._update_token_display()
         else:
-            # No saved sessions — try legacy single-session restore
+            # No multi-session history — try legacy single-session restore
+            # (at most one session, cheap enough on the UI thread).
             session = self._ctrl.restore_session()
             if session:
                 legacy_cv = self._active_chat_view()

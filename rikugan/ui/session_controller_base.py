@@ -430,15 +430,23 @@ class SessionControllerBase:
         elif self._active_tab_id == tab_id:
             self._active_tab_id = next(iter(self._sessions))
 
-    def restore_sessions(self) -> list[tuple[str, SessionState]]:
-        """Load ALL saved sessions for the current idb_path and return (tab_id, session) pairs."""
-        results: list[tuple[str, SessionState]] = []
+    def load_restorable_sessions(self) -> list[SessionState]:
+        """Read and parse all saved sessions for the current database from disk.
+
+        Pure data path — performs only disk I/O and JSON/Message parsing and
+        does NOT touch ``self._sessions`` or create any Qt objects, so it is
+        safe to run on a background thread.  The expensive part of restore
+        (parsing every message of every chat) lives here; tab registration and
+        widget creation happen later on the UI thread via
+        ``register_restored_sessions``.  Sessions are returned oldest-first.
+        """
+        loaded: list[SessionState] = []
         if not self.config.restore_sessions_on_start:
             log_debug("Skipping session restore: disabled in config")
-            return results
+            return loaded
         if not self._idb_path:
             log_debug("Skipping session restore: no database path available")
-            return results
+            return loaded
         try:
             history = SessionHistory(self.config)
             summaries = history.list_sessions(
@@ -449,21 +457,47 @@ class SessionControllerBase:
             for summary in summaries:
                 session = history.load_session(summary["id"])
                 if session and session.messages:
-                    tab_id = uuid.uuid4().hex[:8]
-                    self._sessions[tab_id] = session
-                    results.append((tab_id, session))
-                    log_debug(f"Restored session {session.id} as tab {tab_id}")
+                    loaded.append(session)
         except (OSError, ValueError, KeyError) as e:
-            log_error(f"Failed to restore sessions: {e}")
+            log_error(f"Failed to load sessions for restore: {e}")
+        return loaded
+
+    def register_restored_sessions(self, sessions: list[SessionState]) -> list[tuple[str, SessionState]]:
+        """Register pre-loaded sessions as tabs. Must run on the UI thread.
+
+        Assigns tab ids, inserts them into the live session map, drops the
+        default empty tab, and activates the most recent restored session.
+        """
+        results: list[tuple[str, SessionState]] = []
+        for session in sessions:
+            if not session.messages:
+                continue
+            tab_id = uuid.uuid4().hex[:8]
+            self._sessions[tab_id] = session
+            results.append((tab_id, session))
+            log_debug(f"Restored session {session.id} as tab {tab_id}")
         if results:
-            # Remove the default empty session that was created in __init__
-            # and set the first restored tab as active
+            # Drop the default empty session created in __init__ and activate
+            # the most recent restored tab. If the user already started working
+            # in the default tab during the (async) load, keep them there.
+            default_dropped = False
             if self._active_tab_id in self._sessions:
                 default_session = self._sessions[self._active_tab_id]
                 if not default_session.messages:
                     del self._sessions[self._active_tab_id]
-            self._active_tab_id = results[-1][0]  # most recent
+                    default_dropped = True
+            if default_dropped:
+                self._active_tab_id = results[-1][0]  # most recent
         return results
+
+    def restore_sessions(self) -> list[tuple[str, SessionState]]:
+        """Load ALL saved sessions and register them as tabs (synchronous).
+
+        Retained for callers/tests that want the blocking path; the panel uses
+        the split ``load_restorable_sessions`` + ``register_restored_sessions``
+        so the disk/parse cost stays off the UI thread.
+        """
+        return self.register_restored_sessions(self.load_restorable_sessions())
 
     def restore_session(self) -> SessionState | None:
         """Legacy: restore only the latest session into the active tab."""
