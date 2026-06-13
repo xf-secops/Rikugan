@@ -487,6 +487,12 @@ class ChatThreadList(QWidget):
         if row >= 0:
             self._list.takeItem(row)
 
+    def clear(self) -> None:
+        """Remove every chat entry (e.g. when switching databases)."""
+        for tab_id in list(self._items.keys()):
+            self.remove_chat(tab_id)
+        self._selected_tab_id = None
+
     def select_chat(self, tab_id: str) -> None:
         item = self._items.get(tab_id)
         if item is not None:
@@ -633,6 +639,7 @@ class RikuganPanelCore(QWidget):
         # Tab-to-ChatView mapping
         self._chat_views: dict[str, ChatView] = {}
         self._pending_restore_messages: dict[str, list] = {}
+        self._chat_area_stack: QStackedWidget | None = None
         self._chat_sidebar: ChatThreadList | None = None
         self._tab_status: dict[str, str] = {}
         self._context_bar: ContextBar | None = None
@@ -768,7 +775,12 @@ class RikuganPanelCore(QWidget):
         chat_layout.setSpacing(0)
         self._build_tab_widget()
         self._build_main_splitter(chat_layout)
-        self._create_tab(self._ctrl.active_tab_id, "Untitled")
+        if self._config.dont_auto_load_chats:
+            # Open to the placeholder; chats are listed in the sidebar by the
+            # restore pass and materialized on demand when selected.
+            self._show_placeholder()
+        else:
+            self._create_tab(self._ctrl.active_tab_id, "Untitled")
         self._mode_stack.addWidget(chat_page)
 
         # --- Page 1: Tools (lazily populated on first switch) ---
@@ -849,7 +861,12 @@ class RikuganPanelCore(QWidget):
         chat_column_layout = QVBoxLayout(chat_column)
         chat_column_layout.setContentsMargins(0, 0, 0, 0)
         chat_column_layout.setSpacing(0)
-        chat_column_layout.addWidget(self._tab_widget, 1)
+        # Page 0 = the tab widget (chats); page 1 = the "no chat open" placeholder
+        # shown when auto-load is disabled and nothing has been opened yet.
+        self._chat_area_stack = QStackedWidget()
+        self._chat_area_stack.addWidget(self._tab_widget)
+        self._chat_area_stack.addWidget(self._build_placeholder())
+        chat_column_layout.addWidget(self._chat_area_stack, 1)
         chat_column_layout.addWidget(self._build_input_section())
         self._main_splitter.addWidget(chat_column)
 
@@ -863,6 +880,39 @@ class RikuganPanelCore(QWidget):
         self._main_splitter.setStretchFactor(2, 1)
 
         layout.addWidget(self._main_splitter, 1)
+
+    def _build_placeholder(self) -> QWidget:
+        """Build the 'no chat open' screen shown when auto-load is disabled."""
+        placeholder = QWidget()
+        layout = QVBoxLayout(placeholder)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(12)
+
+        label = QLabel("Please select a chat or create a new one")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet(maybe_host_stylesheet("color: #808080; font-size: 13px;"))
+        layout.addWidget(label)
+
+        new_btn = QPushButton("New Chat")
+        new_btn.setFixedWidth(120)
+        new_btn.setStyleSheet(maybe_host_stylesheet(_SMALL_BTN_STYLE))
+        new_btn.clicked.connect(self._on_new_tab)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(new_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        return placeholder
+
+    def _show_placeholder(self) -> None:
+        """Show the 'no chat open' placeholder in the chat area."""
+        if self._chat_area_stack is not None:
+            self._chat_area_stack.setCurrentIndex(1)
+
+    def _show_chat_area(self) -> None:
+        """Show the tabbed chat area (hides the placeholder)."""
+        if self._chat_area_stack is not None:
+            self._chat_area_stack.setCurrentIndex(0)
 
     def _build_input_section(self) -> QWidget:
         """Build the bottom input area with text field and action buttons."""
@@ -915,8 +965,12 @@ class RikuganPanelCore(QWidget):
         """Show the tab bar only when there are 2+ tabs."""
         self._tab_bar.setVisible(False)
 
-    def _create_tab(self, tab_id: str, label: str) -> ChatView:
-        """Create a new ChatView and add it as a tab."""
+    def _create_tab(self, tab_id: str, label: str, add_to_sidebar: bool = True, select: bool = True) -> ChatView:
+        """Create a new ChatView and add it as a tab.
+
+        ``add_to_sidebar`` is False when materializing a ChatView for a chat that
+        already has a sidebar entry (lazy open in don't-auto-load mode).
+        """
         chat_view = ChatView()
         chat_view.setProperty("tab_id", tab_id)  # O(1) lookup in _tab_id_at_index
         chat_view.set_tool_approval_callback(self._on_tool_approval)
@@ -925,12 +979,27 @@ class RikuganPanelCore(QWidget):
         index = self._tab_widget.addTab(chat_view, label)
         # Re-apply with the now-established parent palette
         chat_view.setStyleSheet(build_chat_view_stylesheet(chat_view))
-        self._tab_widget.setCurrentIndex(index)
+        if select:
+            self._tab_widget.setCurrentIndex(index)
+            self._show_chat_area()
         if self._chat_sidebar is not None:
-            self._chat_sidebar.add_chat(tab_id, label, self._chat_detail(tab_id))
-            self._chat_sidebar.select_chat(tab_id)
+            if add_to_sidebar:
+                self._chat_sidebar.add_chat(tab_id, label, self._chat_detail(tab_id))
+            if select:
+                self._chat_sidebar.select_chat(tab_id)
         self._update_tab_bar_visibility()
         return chat_view
+
+    def _add_unloaded_chat(self, tab_id: str, session) -> None:
+        """List a restored chat in the sidebar without building its ChatView.
+
+        Used in don't-auto-load mode: the session is registered in the
+        controller and its messages are stashed for replay; the (expensive)
+        ChatView is created only when the user opens the chat.
+        """
+        self._pending_restore_messages[tab_id] = session.messages
+        if self._chat_sidebar is not None:
+            self._chat_sidebar.add_chat(tab_id, self._ctrl.tab_label(tab_id), self._chat_detail(tab_id))
 
     def _on_new_tab(self) -> None:
         """Create a fresh independent chat tab."""
@@ -965,12 +1034,18 @@ class RikuganPanelCore(QWidget):
 
     def _select_chat(self, tab_id: str) -> None:
         if tab_id not in self._chat_views:
-            return
+            # Lazy open (don't-auto-load mode): the chat is listed but its
+            # ChatView hasn't been built yet. Materialize it now; messages are
+            # replayed by _restore_messages_if_needed below.
+            if self._ctrl.get_session(tab_id) is None:
+                return
+            self._create_tab(tab_id, self._ctrl.tab_label(tab_id), add_to_sidebar=False, select=False)
         cv = self._chat_views[tab_id]
         for i in range(self._tab_widget.count()):
             if self._tab_widget.widget(i) is cv:
                 self._tab_widget.setCurrentIndex(i)
                 break
+        self._show_chat_area()
         self._ctrl.switch_tab(tab_id)
         self._restore_messages_if_needed(tab_id)
         self._update_token_display()
@@ -1003,11 +1078,17 @@ class RikuganPanelCore(QWidget):
             cv.deleteLater()
         if self._chat_sidebar is not None:
             self._chat_sidebar.remove_chat(tab_id)
+        self._pending_restore_messages.pop(tab_id, None)
         self._ctrl.delete_tab(tab_id)
         active = self._ctrl.active_tab_id
-        if active not in self._chat_views:
+        if active in self._chat_views:
+            self._select_chat(active)
+        elif self._config.dont_auto_load_chats:
+            # Don't force a chat open over the placeholder; the rest stay listed.
+            self._show_placeholder()
+        else:
             self._create_tab(active, "Untitled")
-        self._select_chat(active)
+            self._select_chat(active)
         self._refresh_chat_sidebar()
 
     def _export_chat(self, tab_id: str) -> None:
@@ -1301,8 +1382,13 @@ class RikuganPanelCore(QWidget):
                 w.deleteLater()
         self._chat_views.clear()
         self._pending_restore_messages.clear()
-        # Create default tab and try to restore saved sessions
-        self._create_tab(self._ctrl.active_tab_id, "Untitled")
+        if self._chat_sidebar is not None:
+            self._chat_sidebar.clear()
+        # Show the default tab (or placeholder) and try to restore saved sessions
+        if self._config.dont_auto_load_chats:
+            self._show_placeholder()
+        else:
+            self._create_tab(self._ctrl.active_tab_id, "Untitled")
         self._try_restore_session()
 
     def _on_submit(self, text: str) -> None:
@@ -1310,7 +1396,11 @@ class RikuganPanelCore(QWidget):
             return
         chat_view = self._active_chat_view()
         if chat_view is None:
-            return
+            # Placeholder mode (don't-auto-load): start a fresh chat to host it.
+            self._on_new_tab()
+            chat_view = self._active_chat_view()
+            if chat_view is None:
+                return
         tab_id = self._ctrl.active_tab_id
         # Block free-text when awaiting button-only approval (plan/save).
         if tab_id in self._awaiting_approval_tabs:
@@ -1631,6 +1721,13 @@ class RikuganPanelCore(QWidget):
         if self._is_shutdown:
             return
         restored = self._ctrl.register_restored_sessions(sessions)
+        if restored and self._config.dont_auto_load_chats:
+            # List the chats in the sidebar but don't open any — stay on the
+            # placeholder. ChatViews are built lazily when a chat is selected.
+            for tab_id, session in restored:
+                self._add_unloaded_chat(tab_id, session)
+            self._show_placeholder()
+            return
         if restored:
             # Remove the default empty tab if registration dropped it.
             for tid, cv in list(self._chat_views.items()):
