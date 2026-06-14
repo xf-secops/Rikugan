@@ -51,13 +51,14 @@ class TestQtCompat(unittest.TestCase):
     def test_target_ui_files_do_not_use_exec_legacy_or_qt_flag_bitwise_or(self):
         offenders: list[str] = []
         for path in sorted(_UI_ROOT.rglob("*.py")):
-            tree = ast.parse(path.read_text(), filename=str(path))
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(path))
             relative_path = path.relative_to(_REPO_ROOT)
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "exec_":
                     offenders.append(f"{relative_path}:{node.lineno}:exec_()")
                 if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-                    segment = ast.get_source_segment(path.read_text(), node) or ""
+                    segment = ast.get_source_segment(source, node) or ""
                     if "Qt." in segment:
                         offenders.append(f"{relative_path}:{node.lineno}:{segment}")
         self.assertEqual([], offenders)
