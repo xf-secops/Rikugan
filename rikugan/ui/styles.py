@@ -19,6 +19,12 @@ _FALLBACK_COLORS = {
     "light": "#f3f3f3",
 }
 
+# Warm tint targets for the assistant bubble (and its code blocks). The bubble
+# blends the host-derived surface toward one of these so it reads as a warm
+# taupe instead of a flat cold grey, while still adapting to the host palette.
+_WARM_CREAM = "#ffecd2"  # lighten + warm dark surfaces
+_WARM_BROWN = "#4a3c28"  # darken + warm light surfaces
+
 
 def _hex_luminance(color: str) -> float:
     color = color.lstrip("#")
@@ -142,19 +148,25 @@ def get_chat_color_tokens(source=None) -> dict[str, str]:
     toward = "#ffffff" if is_dark else "#000000"
 
     chat_canvas = blend_theme_color(panel, toward, 0.04 if is_dark else 0.018)
-    assistant_bg = blend_theme_color(chat_canvas, toward, 0.08 if is_dark else 0.035)
+    # The assistant bubble (and its code blocks) warm toward a cream/brown so it
+    # reads as a soft warm taupe rather than a flat cold grey. Other surfaces
+    # keep the neutral blend toward white/black.
+    warm = _WARM_CREAM if is_dark else _WARM_BROWN
+    assistant_bg = blend_theme_color(chat_canvas, warm, 0.14 if is_dark else 0.06)
+    assistant_border = blend_theme_color(assistant_bg, warm, 0.10 if is_dark else 0.08)
     tool_bg = blend_theme_color(chat_canvas, toward, 0.06 if is_dark else 0.028)
     thinking_bg = blend_theme_color(chat_canvas, toward, 0.10 if is_dark else 0.05)
     input_bg = blend_theme_color(chat_canvas, toward, 0.12 if is_dark else 0.045)
     border = blend_theme_color(colors["mid"], panel, 0.35)
-    muted = blend_theme_color(text, panel, 0.45)
-    subtle = blend_theme_color(text, panel, 0.30)
-    code_bg = blend_theme_color(assistant_bg, toward, 0.08 if is_dark else 0.04)
+    muted = blend_theme_color(text, panel, 0.38)
+    subtle = blend_theme_color(text, panel, 0.22)
+    code_bg = blend_theme_color(assistant_bg, warm, 0.10 if is_dark else 0.05)
 
     return {
         "panel": panel,
         "chat_canvas": chat_canvas,
         "assistant_bg": assistant_bg,
+        "assistant_border": assistant_border,
         "tool_bg": tool_bg,
         "thinking_bg": thinking_bg,
         "input_bg": input_bg,

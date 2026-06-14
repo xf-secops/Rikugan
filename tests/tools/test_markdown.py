@@ -184,7 +184,7 @@ class TestInlineFormatting(unittest.TestCase):
 
     def test_link(self):
         result = _inline_formatting("[text](http://example.com)")
-        self.assertIn('<a', result)
+        self.assertIn("<a", result)
         self.assertIn("href", result)
         self.assertIn("text", result)
         self.assertIn("http://example.com", result)
@@ -243,6 +243,114 @@ class TestMdToHtmlIntegration(unittest.TestCase):
         result = md_to_html("- [link](http://x.com)")
         self.assertIn("href", result)
         self.assertIn("<li>", result)
+
+
+class TestMdToHtmlHeadersExtended(unittest.TestCase):
+    def test_h5(self):
+        self.assertIn("12px", md_to_html("##### Five"))
+
+    def test_h6(self):
+        self.assertIn("11px", md_to_html("###### Six"))
+
+
+class TestMdToHtmlStrikethrough(unittest.TestCase):
+    def test_strikethrough(self):
+        self.assertEqual(_inline_formatting("~~gone~~"), "<s>gone</s>")
+
+    def test_strikethrough_in_text(self):
+        result = md_to_html("keep ~~drop~~ keep")
+        self.assertIn("<s>drop</s>", result)
+
+
+class TestMdToHtmlBoldItalic(unittest.TestCase):
+    def test_triple_star_is_bold_italic(self):
+        self.assertEqual(_inline_formatting("***wow***"), "<b><i>wow</i></b>")
+
+
+class TestMdToHtmlTables(unittest.TestCase):
+    def test_basic_table(self):
+        result = md_to_html("| A | B |\n| - | - |\n| 1 | 2 |")
+        self.assertIn("<table", result)
+        self.assertIn("<th", result)
+        self.assertIn("<td", result)
+        for token in ("A", "B", "1", "2"):
+            self.assertIn(token, result)
+
+    def test_table_alignment(self):
+        result = md_to_html("| L | R |\n|:--|--:|\n| a | b |")
+        self.assertIn('align="right"', result)
+
+    def test_table_inline_formatting_in_cells(self):
+        result = md_to_html("| H |\n| - |\n| **b** |")
+        self.assertIn("<b>b</b>", result)
+
+    def test_ragged_row_padded(self):
+        # A short data row should not raise and still produces cells.
+        result = md_to_html("| A | B |\n| - | - |\n| only |")
+        self.assertIn("<table", result)
+        self.assertIn("only", result)
+
+    def test_pipe_text_without_separator_is_not_a_table(self):
+        result = md_to_html("a | b | c")
+        self.assertNotIn("<table", result)
+
+
+class TestMdToHtmlBlockquote(unittest.TestCase):
+    def test_blockquote(self):
+        result = md_to_html("> quoted text")
+        self.assertIn("<blockquote", result)
+        self.assertIn("quoted text", result)
+
+    def test_blockquote_inline(self):
+        result = md_to_html("> see **this**")
+        self.assertIn("<b>this</b>", result)
+
+    def test_nested_blockquote(self):
+        result = md_to_html("> outer\n> > inner")
+        self.assertEqual(result.count("<blockquote"), 2)
+        self.assertIn("inner", result)
+
+
+class TestMdToHtmlNestedLists(unittest.TestCase):
+    def test_nested_bullets(self):
+        result = md_to_html("- a\n  - b\n- c")
+        self.assertEqual(result.count("<ul"), 2)
+        for token in ("a", "b", "c"):
+            self.assertIn(token, result)
+
+    def test_plus_bullet(self):
+        result = md_to_html("+ one\n+ two")
+        self.assertIn("<ul", result)
+        self.assertIn("one", result)
+
+    def test_nested_ordered(self):
+        result = md_to_html("1. a\n    1. b")
+        self.assertIn("<ol", result)
+        self.assertIn("b", result)
+
+
+class TestMdToHtmlTaskLists(unittest.TestCase):
+    def test_unchecked_and_checked(self):
+        result = md_to_html("- [ ] todo\n- [x] done")
+        self.assertIn("☐ todo", result)  # ☐
+        self.assertIn("☑ done", result)  # ☑
+
+    def test_task_list_has_no_bullet(self):
+        result = md_to_html("- [ ] todo")
+        self.assertNotIn("<li>", result)
+
+
+class TestMdToHtmlAutolink(unittest.TestCase):
+    def test_bare_url_becomes_link(self):
+        result = md_to_html("see https://example.com/x now")
+        self.assertIn('href="https://example.com/x"', result)
+
+    def test_explicit_link_not_double_wrapped(self):
+        result = _inline("[name](https://example.com)")
+        self.assertEqual(result.count("<a "), 1)
+
+    def test_no_url_unchanged(self):
+        self.assertEqual(_inline_formatting("just words"), "just words")
 
 
 if __name__ == "__main__":

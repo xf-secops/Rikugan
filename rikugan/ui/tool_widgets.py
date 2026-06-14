@@ -27,7 +27,7 @@ from .styles import host_stylesheet, use_native_host_theme
 _MAX_ARGS_DISPLAY = 2000
 _MAX_RESULT_DISPLAY = 3000
 _TOOL_PREVIEW_LINES = 3
-_MUTED_TEXT = "#808080"
+_MUTED_TEXT = "#a8a8a8"
 _TOOL_BG = "#252526"
 _TOOL_BORDER = "#3c3c3c"
 
@@ -402,7 +402,7 @@ def _make_preview_label(source=None) -> QLabel:
     lbl.setWordWrap(True)
     lbl.setStyleSheet(
         host_stylesheet(
-            "color: #6a6a7a; font-family: monospace; font-size: 10px; margin-left: 28px;",
+            "color: #9a9a9a; font-family: monospace; font-size: 10px; margin-left: 28px;",
             f"color: {_MUTED_TEXT}; {_native_text_style(size=10, monospace=True)}",
         )
     )
@@ -555,7 +555,7 @@ class ToolCallWidget(QFrame):
         self._summary_label = QLabel("")
         self._summary_label.setStyleSheet(
             host_stylesheet(
-                "color: #808080; font-size: 11px; margin-left: 6px;",
+                "color: #a8a8a8; font-size: 11px; margin-left: 6px;",
                 f"color: {_MUTED_TEXT}; {_native_text_style(size=11)}",
             )
         )
@@ -599,7 +599,7 @@ class ToolCallWidget(QFrame):
         self._result_header = QLabel("Result:")
         self._result_header.setStyleSheet(
             host_stylesheet(
-                "color: #808080; font-size: 10px; font-weight: bold;",
+                "color: #a8a8a8; font-size: 10px; font-weight: bold;",
                 f"color: {_MUTED_TEXT}; {_native_text_style(size=10, bold=True)}",
             )
         )
@@ -786,7 +786,7 @@ class ToolBatchWidget(QFrame):
         self._count_label = QLabel("")
         self._count_label.setStyleSheet(
             host_stylesheet(
-                "color: #808080; font-size: 11px; margin-left: 6px;",
+                "color: #a8a8a8; font-size: 11px; margin-left: 6px;",
                 f"color: {_MUTED_TEXT}; {_native_text_style(size=11)}",
             )
         )
@@ -836,7 +836,7 @@ class ToolBatchWidget(QFrame):
         entry = QLabel(f"#{self._count}: {summary}" if summary else f"#{self._count}")
         entry.setStyleSheet(
             host_stylesheet(
-                "color: #808080; font-family: monospace; font-size: 10px;",
+                "color: #a8a8a8; font-family: monospace; font-size: 10px;",
                 f"color: {_MUTED_TEXT}; {_native_text_style(size=10, monospace=True)}",
             )
         )
@@ -951,8 +951,8 @@ class ToolGroupWidget(QFrame):
         self._label = QLabel("0 tools called")
         self._label.setStyleSheet(
             host_stylesheet(
-                "color: #808080; font-size: 11px; font-weight: bold;",
-                f"color: {_MUTED_TEXT}; {_native_text_style(size=11, bold=True)}",
+                "color: #c8c8c8; font-size: 11px; font-weight: bold;",
+                f"color: #c8c8c8; {_native_text_style(size=11, bold=True)}",
             )
         )
         header_layout.addWidget(self._label, 1)
@@ -1194,7 +1194,7 @@ class ToolApprovalWidget(QFrame):
         self._info = QLabel(f"Python code - {len(code_lines)} line{'s' if len(code_lines) != 1 else ''}")
         self._info.setStyleSheet(
             host_stylesheet(
-                "color: #808080; font-size: 10px;",
+                "color: #a8a8a8; font-size: 10px;",
                 f"color: {_MUTED_TEXT}; {_native_text_style(size=10)}",
             )
         )
@@ -1297,7 +1297,7 @@ class ToolApprovalWidget(QFrame):
         self._disable_buttons()
         self._allow_btn.setText("  Allowed  ")
         allowed_css = (
-            "QToolButton { background: #1a5c2d; color: #808080; border: none; "
+            "QToolButton { background: #1a5c2d; color: #d4d4d4; border: none; "
             "border-radius: 4px; padding: 4px 16px; font-size: 11px; }"
         )
         self._allow_btn.setStyleSheet(host_stylesheet(allowed_css, allowed_css))
@@ -1308,7 +1308,7 @@ class ToolApprovalWidget(QFrame):
         self._disable_buttons()
         self._always_btn.setText("  Always Allowed  ")
         always_allowed_css = (
-            "QToolButton { background: #1a5c2d; color: #808080; border: none; "
+            "QToolButton { background: #1a5c2d; color: #d4d4d4; border: none; "
             "border-radius: 4px; padding: 4px 16px; font-size: 11px; }"
         )
         self._always_btn.setStyleSheet(host_stylesheet(always_allowed_css, always_allowed_css))
@@ -1319,7 +1319,7 @@ class ToolApprovalWidget(QFrame):
         self._disable_buttons()
         self._deny_btn.setText("  Denied  ")
         denied_css = (
-            "QToolButton { background: #6e1a12; color: #808080; border: none; "
+            "QToolButton { background: #6e1a12; color: #d4d4d4; border: none; "
             "border-radius: 4px; padding: 4px 16px; font-size: 11px; }"
         )
         self._deny_btn.setStyleSheet(host_stylesheet(denied_css, denied_css))
