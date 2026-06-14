@@ -68,6 +68,19 @@ def _color_luminance(color: str) -> float:
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
+def _ensure_readable(fg: str, bg: str) -> str:
+    """Return *fg* if it contrasts with *bg*, else a high-contrast fallback.
+
+    Some host themes resolve a body-text color that sits too close to a darker
+    control surface (e.g. the exploration-finding card), making small text hard
+    to read.  This guarantees a legible color without disturbing themes whose
+    foreground already has enough contrast.
+    """
+    if abs(_color_luminance(fg) - _color_luminance(bg)) >= 0.4:
+        return fg
+    return "#ececec" if _color_luminance(bg) < 0.5 else "#1a1a1a"
+
+
 def _theme_colors(source=None) -> dict[str, str]:
     if isinstance(source, dict):
         return source
@@ -96,7 +109,13 @@ def _border_color(source=None) -> str:
 
 def _assistant_bubble_theme(source=None) -> dict[str, str]:
     colors = _theme_colors(source)
-    return {"background": colors["assistant_bg"], "text": colors["text"], "border": colors["border"]}
+    return {
+        "background": colors["assistant_bg"],
+        "text": colors["text"],
+        # Soft warm edge for a smoother bubble; fall back to the neutral border
+        # if a caller passed a pre-built token dict without the new key.
+        "border": colors.get("assistant_border", colors["border"]),
+    }
 
 
 def _user_bubble_theme(source=None) -> dict[str, str]:
@@ -279,7 +298,7 @@ class UserMessageWidget(QFrame):
         )
         layout.addWidget(self._role_label)
 
-        bubble = _user_bubble_theme(self)
+        bubble = _user_bubble_theme(parent or self)
         self._content = QLabel(text)
         self._content.setWordWrap(True)
         self._content.setTextInteractionFlags(
@@ -373,8 +392,8 @@ class _ThinkingBlock(QFrame):
         self._header_label = QLabel("Thinking")
         self._header_label.setStyleSheet(
             host_stylesheet(
-                f"color: {_muted_text(self)}; font-size: 11px; font-style: italic;",
-                f"color: {_muted_text(self)}; {_native_text_style(size=11, italic=True)}",
+                f"color: {_muted_text(parent or self)}; font-size: 11px; font-style: italic;",
+                f"color: {_muted_text(parent or self)}; {_native_text_style(size=11, italic=True)}",
             )
         )
         header.addWidget(self._header_label, 1)
@@ -391,8 +410,8 @@ class _ThinkingBlock(QFrame):
         )
         self._content.setStyleSheet(
             host_stylesheet(
-                f"color: {_subtle_text(self)}; font-size: 12px;",
-                f"color: {_subtle_text(self)}; {_native_text_style(size=12, italic=True)}",
+                f"color: {_subtle_text(parent or self)}; font-size: 12px;",
+                f"color: {_subtle_text(parent or self)}; {_native_text_style(size=12, italic=True)}",
             )
         )
         self._content.hide()
@@ -515,7 +534,7 @@ class AssistantMessageWidget(QFrame):
         # The bubble is a frame carrying the surface (bg/border/radius); the
         # committed and tail labels live inside it with transparent backgrounds
         # so the two stacked labels read as one continuous bubble.
-        bubble = _assistant_bubble_theme(self)
+        bubble = _assistant_bubble_theme(parent or self)
         self._bubble = QFrame()
         self._bubble.setObjectName("message_assistant_bubble")
         self._bubble.setStyleSheet(
@@ -708,8 +727,8 @@ class ThinkingWidget(QFrame):
         self._phrase_label = QLabel(_THINKING_PHRASES[self._phrase_idx])
         self._phrase_label.setStyleSheet(
             host_stylesheet(
-                f"color: {_muted_text(self)}; font-style: italic; font-size: 12px;",
-                f"color: {_muted_text(self)}; {_native_text_style(size=12, italic=True)}",
+                f"color: {_muted_text(parent or self)}; font-style: italic; font-size: 12px;",
+                f"color: {_muted_text(parent or self)}; {_native_text_style(size=12, italic=True)}",
             )
         )
         layout.addWidget(self._phrase_label, 1)
@@ -781,8 +800,8 @@ class QueuedMessageWidget(QFrame):
         )
         self._content.setStyleSheet(
             host_stylesheet(
-                f"color: {_body_text(self)}; font-size: 13px;",
-                f"color: {_body_text(self)}; {_native_text_style(size=13)}",
+                f"color: {_body_text(parent or self)}; font-size: 13px;",
+                f"color: {_body_text(parent or self)}; {_native_text_style(size=13)}",
             )
         )
         content_layout.addWidget(self._content)
@@ -792,8 +811,8 @@ class QueuedMessageWidget(QFrame):
         self._badge = QLabel("[queued]")
         self._badge.setStyleSheet(
             host_stylesheet(
-                f"color: {_muted_text(self)}; font-size: 10px; font-style: italic;",
-                f"color: {_muted_text(self)}; {_native_text_style(size=10, italic=True)}",
+                f"color: {_muted_text(parent or self)}; font-size: 10px; font-style: italic;",
+                f"color: {_muted_text(parent or self)}; {_native_text_style(size=10, italic=True)}",
             )
         )
         self._badge.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -839,8 +858,8 @@ class UserQuestionWidget(QFrame):
         )
         self._q_label.setStyleSheet(
             host_stylesheet(
-                f"color: {_body_text(self)}; font-size: 13px;",
-                f"color: {_body_text(self)}; {_native_text_style(size=13)}",
+                f"color: {_body_text(parent or self)}; font-size: 13px;",
+                f"color: {_body_text(parent or self)}; {_native_text_style(size=13)}",
             )
         )
         layout.addWidget(self._q_label)
@@ -949,8 +968,15 @@ class ExplorationFindingWidget(QFrame):
     ):
         super().__init__(parent)
         self.setObjectName("message_tool")
+        src = parent or self
         color = self._CATEGORY_COLORS.get(category, "#808080")
-        self.setStyleSheet(_tool_frame_style(source=parent or self, accent=color))
+        self.setStyleSheet(_tool_frame_style(source=src, accent=color))
+
+        # Resolve text colors against the actual card surface so the summary
+        # stays readable even when the host theme's body text is low-contrast.
+        surface = _tool_surface(src)
+        summary_color = _ensure_readable(_body_text(src), surface)
+        addr_color = _ensure_readable(_muted_text(src), surface)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
@@ -969,8 +995,8 @@ class ExplorationFindingWidget(QFrame):
             self._addr_label = QLabel(address)
             self._addr_label.setStyleSheet(
                 host_stylesheet(
-                    f"color: {_muted_text(self)}; font-family: monospace; font-size: 10px;",
-                    f"color: {_muted_text(self)}; {_native_text_style(size=10, monospace=True)}",
+                    f"color: {addr_color}; font-family: monospace; font-size: 11px;",
+                    f"color: {addr_color}; {_native_text_style(size=11, monospace=True)}",
                 )
             )
             layout.addWidget(self._addr_label)
@@ -979,8 +1005,8 @@ class ExplorationFindingWidget(QFrame):
         self._summary_label.setWordWrap(True)
         self._summary_label.setStyleSheet(
             host_stylesheet(
-                f"color: {_body_text(self)}; font-size: 11px;",
-                f"color: {_body_text(self)}; {_native_text_style(size=11)}",
+                f"color: {summary_color}; font-size: 12px;",
+                f"color: {summary_color}; {_native_text_style(size=12)}",
             )
         )
         layout.addWidget(self._summary_label, 1)
@@ -1033,8 +1059,8 @@ class ResearchNoteWidget(QFrame):
         self._genre_label = QLabel(f"#{genre}")
         self._genre_label.setStyleSheet(
             host_stylesheet(
-                f"color: {_muted_text(self)}; font-size: 10px; font-style: italic;",
-                f"color: {_muted_text(self)}; {_native_text_style(size=10, italic=True)}",
+                f"color: {_muted_text(parent or self)}; font-size: 10px; font-style: italic;",
+                f"color: {_muted_text(parent or self)}; {_native_text_style(size=10, italic=True)}",
             )
         )
         header.addWidget(self._genre_label)
@@ -1045,8 +1071,8 @@ class ResearchNoteWidget(QFrame):
         self._path_label = QLabel(path)
         self._path_label.setStyleSheet(
             host_stylesheet(
-                f"color: {_muted_text(self)}; font-family: monospace; font-size: 10px;",
-                f"color: {_muted_text(self)}; {_native_text_style(size=10, monospace=True)}",
+                f"color: {_muted_text(parent or self)}; font-family: monospace; font-size: 10px;",
+                f"color: {_muted_text(parent or self)}; {_native_text_style(size=10, monospace=True)}",
             )
         )
         layout.addWidget(self._path_label)
@@ -1057,8 +1083,8 @@ class ResearchNoteWidget(QFrame):
             self._preview_label.setWordWrap(True)
             self._preview_label.setStyleSheet(
                 host_stylesheet(
-                    f"color: {_body_text(self)}; font-size: 11px;",
-                    f"color: {_body_text(self)}; {_native_text_style(size=11)}",
+                    f"color: {_body_text(parent or self)}; font-size: 11px;",
+                    f"color: {_body_text(parent or self)}; {_native_text_style(size=11)}",
                 )
             )
             layout.addWidget(self._preview_label)
@@ -1121,8 +1147,8 @@ class SubagentEventWidget(QFrame):
             self._detail.setWordWrap(True)
             self._detail.setStyleSheet(
                 host_stylesheet(
-                    f"color: {_subtle_text(self)}; font-size: 11px;",
-                    f"color: {_subtle_text(self)}; {_native_text_style(size=11)}",
+                    f"color: {_subtle_text(parent or self)}; font-size: 11px;",
+                    f"color: {_subtle_text(parent or self)}; {_native_text_style(size=11)}",
                 )
             )
             layout.addWidget(self._detail, 1)
