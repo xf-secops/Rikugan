@@ -222,6 +222,16 @@ class _HeightCachedLabel(QLabel):
         if h > 0:
             self.setFixedHeight(h)
 
+    def resizeEvent(self, event) -> None:
+        # Re-pin whenever our own width settles to a new value. Without this, a
+        # height pinned at an earlier (narrower) layout width stays too tall, and
+        # QLabel's default vertical centering then leaves an empty band above and
+        # below the text. Height-only changes don't re-trigger this (no width
+        # change), so there's no layout loop.
+        super().resizeEvent(event)
+        if event.size().width() != event.oldSize().width():
+            self.pin_height()
+
 
 # ---------------------------------------------------------------------------
 # Collapsible section (unchanged, used internally)
@@ -571,6 +581,9 @@ class AssistantMessageWidget(QFrame):
             )
         )
         label.setOpenExternalLinks(True)
+        # Top-align so multi-line content never gets vertically centered (QLabel
+        # defaults to AlignVCenter, which looks like a big gap above the text).
+        label.setAlignment(qt_flags(Qt.AlignmentFlag.AlignLeft, Qt.AlignmentFlag.AlignTop))
         label.setStyleSheet(f"background: transparent; color: {text_color}; font-size: 13px;")
         label.setMinimumWidth(0)
         label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)

@@ -133,8 +133,15 @@ def md_to_html(text: str, source=None, theme: dict[str, str] | None = None) -> s
     for idx, block_html in enumerate(blocks):
         result = result.replace(f"\x00BLOCK{idx}\x00", block_html)
 
-    # Clean up runs of <br> left by paragraph joins.
-    return re.sub(r"(<br>\s*){3,}", "<br><br>", result)
+    # Clean up runs of <br> left by paragraph joins (keep at most a blank line).
+    result = re.sub(r"(<br>\s*){3,}", "<br><br>", result)
+    # Block-level elements (lists, tables, blockquotes, code/heading divs, rules)
+    # carry their own margins, so collapse <br> runs sitting directly against
+    # them to a single newline — otherwise they gain an extra blank line and the
+    # layout looks too loose.
+    result = re.sub(r"(?:<br>\s*)+(<(?:ul|ol|table|blockquote|hr|div)\b)", r"<br>\1", result)
+    result = re.sub(r"(</(?:ul|ol|table|blockquote|div)>)(?:\s*<br>)+", r"\1<br>", result)
+    return result
 
 
 def _render_blocks(lines: list[str], theme: dict[str, str]) -> list[str]:
